@@ -103,6 +103,94 @@
 	padding: 0 1px;
 }
 
+/* ── Paragraph inline editor ───────────────────────────────────────────────
+ * Roll back by removing this block and the [paragraph-editor] lines in main.ts.
+ */
+.markdown-preview-section .el-p {
+	position: relative;
+}
+
+.pf-edit-btn {
+	position: absolute;
+	left: -26px;
+	top: 2px;
+	width: 20px;
+	height: 20px;
+	padding: 2px;
+	color: var(--text-faint);
+	opacity: 0;
+	transition: opacity 0.1s, color 0.1s;
+}
+
+.el-p:hover .pf-edit-btn,
+.pf-edit-btn:focus {
+	opacity: 1;
+}
+
+.pf-edit-btn:hover,
+.pf-edit-btn:focus {
+	color: var(--interactive-accent);
+}
+
+.pf-edit-btn svg {
+	width: 14px;
+	height: 14px;
+}
+
+.pf-editor-popup {
+	position: fixed;
+	z-index: var(--layer-popover);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-l);
+	padding: 8px;
+}
+
+.pf-editor-textarea {
+	display: block;
+	width: 100%;
+	min-height: 60px;
+	resize: none;
+	overflow: hidden;
+	box-sizing: border-box;
+	background: var(--background-modifier-form-field);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-small);
+	line-height: var(--line-height-tight);
+	padding: 6px 8px;
+	outline: none;
+}
+
+.pf-editor-textarea:focus {
+	border-color: var(--interactive-accent);
+}
+
+.pf-editor-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-top: 6px;
+	gap: 8px;
+}
+
+.pf-editor-hint {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.pf-editor-ok {
+	flex-shrink: 0;
+	padding: 4px 14px;
+	font-size: var(--font-ui-small);
+	cursor: pointer;
+}
+/* ─────────────────────────────────────────────────────────────────────────── */
+
 /* Hide filter button and search bar in source / live-preview mode */
 .workspace-leaf-content[data-mode="source"] .pf-search-btn,
 .workspace-leaf-content[data-mode="source"] .pf-search-container {

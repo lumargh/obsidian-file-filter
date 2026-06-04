@@ -2,8 +2,9 @@
 // filter page: allow select text + right click > filter by term
 // filter sidebar: add visual indicator of hidden folders and files in the sidebar, in the same way as on the page.
 
-import { MarkdownView, Plugin, WorkspaceLeaf, setIcon } from 'obsidian';
+import { MarkdownView, Plugin, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import { DEFAULT_SETTINGS, FileFilterSettings, FileFilterSettingTab } from './settings';
+import { ParagraphEditor } from './paragraph-editor'; // [paragraph-editor]
 
 interface PageFilterState {
 	query: string;
@@ -18,6 +19,7 @@ export default class FileFilterPlugin extends Plugin {
 	private searchContainerEl: HTMLElement | null = null;
 	private searchInputEl: HTMLInputElement | null = null;
 	private filterTimer: number | null = null;
+	private paragraphEditors = new Map<HTMLElement, ParagraphEditor>(); // [paragraph-editor]
 
 	async onload() {
 		await this.loadSettings();
@@ -68,6 +70,8 @@ export default class FileFilterPlugin extends Plugin {
 		document.querySelectorAll('.pf-search-btn, .pf-search-container, .pf-ellipsis').forEach(el => el.remove());
 		document.querySelectorAll('.pf-filtering').forEach(el => el.classList.remove('pf-filtering'));
 		document.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
+		this.paragraphEditors.forEach(e => e.destroy()); // [paragraph-editor]
+		this.paragraphEditors.clear(); // [paragraph-editor]
 	}
 
 	private getExplorerContainer(): HTMLElement | null {
@@ -429,6 +433,13 @@ export default class FileFilterPlugin extends Plugin {
 			scheduleCurrentFilter();
 			searchInput.focus();
 		});
+
+		// [paragraph-editor]
+		const getFile = (): TFile | null => (leaf.view as MarkdownView)?.file ?? null;
+		const pgEditor = new ParagraphEditor(this.app);
+		this.paragraphEditors.set(viewEl, pgEditor);
+		pgEditor.attach(viewEl, getFile, scheduleCurrentFilter);
+		// [paragraph-editor]
 	}
 
 	async loadSettings() {
