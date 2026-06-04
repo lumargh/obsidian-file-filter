@@ -1,0 +1,10 @@
+{
+	"id": "file-filter",
+	"name": "File Filter",
+	"version": "0.1.0",
+	"minAppVersion": "1.0.0",
+	"description": "Filter and navigate files based on conditions you supply.",
+	"author": "Sebastien",
+	"authorUrl": "https://github.com/lumargh",
+	"isDesktopOnly": false
+}
