@@ -1,4 +1,5 @@
 // todo
+// command-f (or user-defined hotkey) enters reading mode if user is on live preview mode.
 // filter page: allow select text + right click > filter by term
 // filter sidebar: add visual indicator of hidden folders and files in the sidebar, in the same way as on the page.
 
@@ -38,18 +39,27 @@ export default class FileFilterPlugin extends Plugin {
 		this.addCommand({
 			id: 'toggle-page-filter',
 			name: 'Toggle page filter',
-			hotkeys: [{ modifiers: ['Mod'], key: 'f' }],
 			callback: () => {
 				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (!view) return;
-				const container = view.containerEl.querySelector<HTMLElement>('.pf-search-container');
-				const input = view.containerEl.querySelector<HTMLInputElement>('.pf-search-input');
-				if (!container || !input) return;
-				if (container.style.display === 'none') {
-					view.containerEl.querySelector<HTMLElement>('.pf-search-btn')?.click();
+
+				const openFilter = () => {
+					const container = view.containerEl.querySelector<HTMLElement>('.pf-search-container');
+					const input = view.containerEl.querySelector<HTMLInputElement>('.pf-search-input');
+					if (!container || !input) return;
+					if (container.classList.contains('ff-hidden')) {
+						view.containerEl.querySelector<HTMLElement>('.pf-search-btn')?.click();
+					} else {
+						input.focus();
+						input.select();
+					}
+				};
+
+				if (view.getMode() !== 'preview') {
+					view.setState({ ...view.getState(), mode: 'preview' }, { history: false })
+						.then(() => window.setTimeout(openFilter, 50));
 				} else {
-					input.focus();
-					input.select();
+					openFilter();
 				}
 			},
 		});
@@ -67,9 +77,9 @@ export default class FileFilterPlugin extends Plugin {
 		this.searchContainerEl?.remove();
 
 		// Clean up all injected page filter elements
-		document.querySelectorAll('.pf-search-btn, .pf-search-container, .pf-ellipsis').forEach(el => el.remove());
-		document.querySelectorAll('.pf-filtering').forEach(el => el.classList.remove('pf-filtering'));
-		document.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
+		activeDocument.querySelectorAll('.pf-search-btn, .pf-search-container, .pf-ellipsis').forEach(el => el.remove());
+		activeDocument.querySelectorAll('.pf-filtering').forEach(el => el.classList.remove('pf-filtering'));
+		activeDocument.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
 		this.paragraphEditors.forEach(e => e.destroy()); // [paragraph-editor]
 		this.paragraphEditors.clear(); // [paragraph-editor]
 	}
@@ -96,8 +106,7 @@ export default class FileFilterPlugin extends Plugin {
 		navButtons.insertBefore(searchBtn, navButtons.firstChild);
 
 		// Search bar — sits between nav-header and the file tree
-		const searchContainer = createEl('div', { cls: 'ff-search-container' });
-		searchContainer.style.display = 'none';
+		const searchContainer = createEl('div', { cls: 'ff-search-container ff-hidden' });
 
 		const searchInput = searchContainer.createEl('input', {
 			type: 'text',
@@ -133,7 +142,7 @@ export default class FileFilterPlugin extends Plugin {
 
 		// Restore state if plugin was reloaded while filter was active
 		if (this.filterQuery) {
-			searchContainer.style.display = '';
+			searchContainer.classList.remove('ff-hidden');
 			searchInput.value = this.filterQuery;
 			this.applyFilter(container);
 		}
@@ -141,7 +150,7 @@ export default class FileFilterPlugin extends Plugin {
 
 	private toggleSearch(container: HTMLElement) {
 		if (!this.searchContainerEl) return;
-		if (this.searchContainerEl.style.display === 'none') {
+		if (this.searchContainerEl.classList.contains('ff-hidden')) {
 			this.openSearch();
 		} else {
 			this.deactivateSearch(container);
@@ -150,14 +159,14 @@ export default class FileFilterPlugin extends Plugin {
 
 	private openSearch() {
 		if (!this.searchContainerEl || !this.searchInputEl) return;
-		this.searchContainerEl.style.display = '';
+		this.searchContainerEl.classList.remove('ff-hidden');
 		this.searchInputEl.focus();
 		this.searchInputEl.select();
 	}
 
 	private deactivateSearch(container: HTMLElement) {
 		if (!this.searchContainerEl || !this.searchInputEl) return;
-		this.searchContainerEl.style.display = 'none';
+		this.searchContainerEl.classList.add('ff-hidden');
 		this.searchInputEl.value = '';
 		this.filterQuery = '';
 		this.clearFilter(container);
@@ -267,8 +276,7 @@ export default class FileFilterPlugin extends Plugin {
 		setIcon(searchBtn, 'filter');
 		viewActions.prepend(searchBtn);
 
-		const searchContainer = createEl('div', { cls: 'pf-search-container' });
-		searchContainer.style.display = 'none';
+		const searchContainer = createEl('div', { cls: 'pf-search-container ff-hidden' });
 
 		const searchInput = searchContainer.createEl('input', {
 			type: 'text',
@@ -298,19 +306,19 @@ export default class FileFilterPlugin extends Plugin {
 				const text = el.textContent ?? '';
 				const lower = text.toLowerCase();
 				if (!lower.includes(q)) return;
-				const frag = document.createDocumentFragment();
+				const frag = activeDocument.createDocumentFragment();
 				let last = 0;
 				let i = lower.indexOf(q, 0);
 				while (i !== -1) {
-					if (i > last) frag.appendChild(document.createTextNode(text.slice(last, i)));
-					const span = document.createElement('span');
+					if (i > last) frag.appendChild(activeDocument.createTextNode(text.slice(last, i)));
+					const span = activeDocument.createElement('span');
 					span.className = 'pf-highlight';
 					span.textContent = text.slice(i, i + q.length);
 					frag.appendChild(span);
 					last = i + q.length;
 					i = lower.indexOf(q, last);
 				}
-				if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+				if (last < text.length) frag.appendChild(activeDocument.createTextNode(text.slice(last)));
 				el.parentNode?.replaceChild(frag, el);
 			} else if (el.nodeType === Node.ELEMENT_NODE && !(el as Element).classList.contains('pf-highlight')) {
 				Array.from(el.childNodes).forEach(child => highlightTextNodes(child, q));
@@ -321,7 +329,7 @@ export default class FileFilterPlugin extends Plugin {
 			root.querySelectorAll('.pf-highlight').forEach(span => {
 				const parent = span.parentNode;
 				if (!parent) return;
-				parent.replaceChild(document.createTextNode(span.textContent ?? ''), span);
+				parent.replaceChild(activeDocument.createTextNode(span.textContent ?? ''), span);
 				parent.normalize();
 			});
 		};
@@ -377,7 +385,7 @@ export default class FileFilterPlugin extends Plugin {
 		};
 
 		const deactivate = () => {
-			searchContainer.style.display = 'none';
+			searchContainer.classList.add('ff-hidden');
 			searchInput.value = '';
 			state.query = '';
 
@@ -391,8 +399,8 @@ export default class FileFilterPlugin extends Plugin {
 		};
 
 		searchBtn.addEventListener('click', () => {
-			if (searchContainer.style.display === 'none') {
-				searchContainer.style.display = '';
+			if (searchContainer.classList.contains('ff-hidden')) {
+				searchContainer.classList.remove('ff-hidden');
 				searchInput.focus();
 			} else {
 				deactivate();

@@ -1,8 +1,9 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import FileFilterPlugin from './main';
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface FileFilterSettings {
-	// settings will be defined once we know what the plugin does
+	// settings will be defined here as the plugin grows
 }
 
 export const DEFAULT_SETTINGS: FileFilterSettings = {
@@ -21,6 +22,6 @@ export class FileFilterSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName('File Filter').setHeading();
+		new Setting(containerEl).setHeading();
 	}
 }

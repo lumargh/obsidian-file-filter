@@ -1,5 +1,8 @@
 /* file-filter styles */
 
+.ff-hidden {
+	display: none;
+}
 
 .ff-search-container {
 	display: flex;
@@ -140,6 +143,9 @@
 .pf-editor-popup {
 	position: fixed;
 	z-index: var(--layer-popover);
+	width: var(--pf-popup-width, 420px);
+	top: var(--pf-popup-top, 0px);
+	left: var(--pf-popup-left, 0px);
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
@@ -150,6 +156,7 @@
 .pf-editor-textarea {
 	display: block;
 	width: 100%;
+	height: var(--pf-textarea-height, auto);
 	min-height: 60px;
 	resize: none;
 	overflow: hidden;

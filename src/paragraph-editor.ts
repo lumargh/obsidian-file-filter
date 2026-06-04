@@ -24,7 +24,7 @@ export class ParagraphEditor {
 			this.sectionObserver = new MutationObserver(() => {
 				if (pending) return;
 				pending = true;
-				requestAnimationFrame(() => {
+				window.requestAnimationFrame(() => {
 					pending = false;
 					this.injectIcons(section, getFile);
 					onMutation?.();
@@ -55,12 +55,12 @@ export class ParagraphEditor {
 			setIcon(btn, 'pencil');
 			elP.appendChild(btn);
 
-			btn.addEventListener('click', async (e) => {
+			btn.addEventListener('click', (e) => {
 				e.preventDefault();
 				e.stopPropagation();
 				const file = this.resolveFile(elP, getFile);
 				if (!file) return;
-				await this.openPopup(elP, btn, file);
+				void this.openPopup(elP, btn, file);
 			});
 		});
 	}
@@ -96,15 +96,15 @@ export class ParagraphEditor {
 		const okBtn = footer.createEl('button', { cls: 'mod-cta pf-editor-ok', text: 'OK' });
 
 		this.positionPopup(popup, anchor);
-		document.body.appendChild(popup);
+		activeDocument.body.appendChild(popup);
 		this.popup = popup;
 
 		const resize = () => {
-			textarea.style.height = 'auto';
-			textarea.style.height = textarea.scrollHeight + 'px';
+			textarea.setCssProps({ '--pf-textarea-height': 'auto' });
+			textarea.setCssProps({ '--pf-textarea-height': textarea.scrollHeight + 'px' });
 		};
 		textarea.addEventListener('input', resize);
-		requestAnimationFrame(resize);
+		window.requestAnimationFrame(resize);
 
 		textarea.focus();
 
@@ -119,22 +119,19 @@ export class ParagraphEditor {
 			);
 		};
 
-		okBtn.addEventListener('mousedown', async (e: MouseEvent) => {
+		okBtn.addEventListener('mousedown', (e: MouseEvent) => {
 			e.preventDefault(); // prevent textarea blur from firing first
-			await save();
-			this.closePopup();
+			void save().then(() => this.closePopup());
 		});
 
-		textarea.addEventListener('blur', async () => {
-			await save();
-			this.closePopup();
+		textarea.addEventListener('blur', () => {
+			void save().then(() => this.closePopup());
 		});
 
-		textarea.addEventListener('keydown', async (e: KeyboardEvent) => {
+		textarea.addEventListener('keydown', (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				e.preventDefault();
-				await save();
-				this.closePopup();
+				void save().then(() => this.closePopup());
 			}
 		});
 	}
@@ -148,16 +145,17 @@ export class ParagraphEditor {
 		if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
 		left = Math.max(margin, left);
 
-		popup.style.position = 'fixed';
-		popup.style.width = width + 'px';
-		popup.style.top = (rect.bottom + 6) + 'px';
-		popup.style.left = left + 'px';
+		const top = rect.bottom + 6;
+		popup.setCssProps({
+			'--pf-popup-top': top + 'px',
+			'--pf-popup-left': left + 'px',
+		});
 
 		// Flip above if popup would extend past the bottom of the viewport
-		requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			const ph = popup.getBoundingClientRect().height;
-			if (parseFloat(popup.style.top) + ph > window.innerHeight - margin) {
-				popup.style.top = (rect.top - ph - 6) + 'px';
+			if (top + ph > window.innerHeight - margin) {
+				popup.setCssProps({ '--pf-popup-top': (rect.top - ph - 6) + 'px' });
 			}
 		});
 	}
