@@ -20,11 +20,17 @@ export class ParagraphEditor {
 			this.injectIcons(section, getFile);
 
 			this.sectionObserver?.disconnect();
+			let pending = false;
 			this.sectionObserver = new MutationObserver(() => {
-				this.injectIcons(section, getFile);
-				onMutation?.();
+				if (pending) return;
+				pending = true;
+				requestAnimationFrame(() => {
+					pending = false;
+					this.injectIcons(section, getFile);
+					onMutation?.();
+				});
 			});
-			this.sectionObserver.observe(section, { childList: true });
+			this.sectionObserver.observe(section, { childList: true, subtree: true });
 			return true;
 		};
 
@@ -39,6 +45,8 @@ export class ParagraphEditor {
 	private injectIcons(section: HTMLElement, getFile: () => TFile | null): void {
 		section.querySelectorAll<HTMLElement>('.el-p').forEach(elP => {
 			if (elP.querySelector('.pf-edit-btn')) return;
+			// Skip the wrapper el-p for an embedded file — icons go on its inner paragraphs instead
+			if (elP.querySelector('.internal-embed')) return;
 
 			const btn = createEl('button', {
 				cls: 'clickable-icon pf-edit-btn',
@@ -50,11 +58,24 @@ export class ParagraphEditor {
 			btn.addEventListener('click', async (e) => {
 				e.preventDefault();
 				e.stopPropagation();
-				const file = getFile();
+				const file = this.resolveFile(elP, getFile);
 				if (!file) return;
 				await this.openPopup(elP, btn, file);
 			});
 		});
+	}
+
+	private resolveFile(elP: HTMLElement, getFile: () => TFile | null): TFile | null {
+		const embed = elP.closest<HTMLElement>('.internal-embed');
+		if (embed) {
+			const src = embed.getAttribute('src');
+			const sourcePath = getFile()?.path ?? '';
+			if (src) {
+				const resolved = this.app.metadataCache.getFirstLinkpathDest(src, sourcePath);
+				if (resolved) return resolved;
+			}
+		}
+		return getFile();
 	}
 
 	private async openPopup(elP: HTMLElement, anchor: HTMLElement, file: TFile): Promise<void> {
@@ -71,7 +92,7 @@ export class ParagraphEditor {
 		const textarea = popup.createEl('textarea', { cls: 'pf-editor-textarea' });
 		textarea.value = span.text;
 		const footer = popup.createEl('div', { cls: 'pf-editor-footer' });
-		footer.createEl('span', { cls: 'pf-editor-hint', text: '⇥ Tab to close' });
+		footer.createEl('span', { cls: 'pf-editor-hint', text: '⇥ Tab or esc to close' });
 		const okBtn = footer.createEl('button', { cls: 'mod-cta pf-editor-ok', text: 'OK' });
 
 		this.positionPopup(popup, anchor);
