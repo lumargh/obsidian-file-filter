@@ -1,7 +1,7 @@
 /* file-filter styles */
 
 .ff-hidden {
-	display: none;
+	display: none !important;
 }
 
 .ff-search-container {
@@ -198,11 +198,6 @@
 }
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-/* Hide filter button and search bar in source / live-preview mode */
-.workspace-leaf-content[data-mode="source"] .pf-search-btn,
-.workspace-leaf-content[data-mode="source"] .pf-search-container {
-	display: none;
-}
 
 /*
  * Expand collapsed folders that have matching children.

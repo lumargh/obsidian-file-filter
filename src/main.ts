@@ -1,10 +1,8 @@
 // todo
-// command-f (or user-defined hotkey) enters reading mode if user is on live preview mode.
-// filter page: allow select text + right click > filter by term
-// filter sidebar: add visual indicator of hidden folders and files in the sidebar, in the same way as on the page.
+// filter page: right-click selected text > filter by term (broke page filter + edit icons — needs investigation before reimplementing)
+// filter sidebar: add customizable command to jump focus to the sidebar filter bar
 
 import { MarkdownView, Plugin, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
-import { DEFAULT_SETTINGS, FileFilterSettings, FileFilterSettingTab } from './settings';
 import { ParagraphEditor } from './paragraph-editor'; // [paragraph-editor]
 
 interface PageFilterState {
@@ -13,8 +11,6 @@ interface PageFilterState {
 }
 
 export default class FileFilterPlugin extends Plugin {
-	settings!: FileFilterSettings;
-
 	private filterQuery = '';
 	private filterActive = false;
 	private searchContainerEl: HTMLElement | null = null;
@@ -23,8 +19,6 @@ export default class FileFilterPlugin extends Plugin {
 	private paragraphEditors = new Map<HTMLElement, ParagraphEditor>(); // [paragraph-editor]
 
 	async onload() {
-		await this.loadSettings();
-		this.addSettingTab(new FileFilterSettingTab(this.app, this));
 
 		this.app.workspace.onLayoutReady(() => {
 			this.initExplorer();
@@ -56,7 +50,7 @@ export default class FileFilterPlugin extends Plugin {
 				};
 
 				if (view.getMode() !== 'preview') {
-					view.setState({ ...view.getState(), mode: 'preview' }, { history: false })
+					void view.setState({ ...view.getState(), mode: 'preview' }, { history: false })
 						.then(() => window.setTimeout(openFilter, 50));
 				} else {
 					openFilter();
@@ -399,7 +393,14 @@ export default class FileFilterPlugin extends Plugin {
 		};
 
 		searchBtn.addEventListener('click', () => {
-			if (searchContainer.classList.contains('ff-hidden')) {
+			const view = leaf.view as MarkdownView;
+			if (view.getMode() !== 'preview') {
+				void view.setState({ ...view.getState(), mode: 'preview' }, { history: false })
+					.then(() => window.setTimeout(() => {
+						searchContainer.classList.remove('ff-hidden');
+						searchInput.focus();
+					}, 50));
+			} else if (searchContainer.classList.contains('ff-hidden')) {
 				searchContainer.classList.remove('ff-hidden');
 				searchInput.focus();
 			} else {
@@ -450,11 +451,4 @@ export default class FileFilterPlugin extends Plugin {
 		// [paragraph-editor]
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<FileFilterSettings>);
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
 }
