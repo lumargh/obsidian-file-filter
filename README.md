@@ -25,3 +25,7 @@ Press **Escape** or click **×** to clear the filter and return to the normal vi
 - Folder hierarchy is preserved for every matching file
 - Collapsed folders that contain matches are automatically expanded while the filter is active, then restored when cleared
 - All file types are included, not just Markdown notes
+
+## Other Plugins
+
+Check out [Date List](https://community.obsidian.md/plugins/date-list) and [Calendar List](https://community.obsidian.md/plugins/calendar-list) if you liked this plugin.
