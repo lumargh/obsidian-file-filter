@@ -103,6 +103,12 @@
 	padding: 0 1px;
 }
 
+/* Hide filter button and search bar in source / live-preview mode */
+.workspace-leaf-content[data-mode="source"] .pf-search-btn,
+.workspace-leaf-content[data-mode="source"] .pf-search-container {
+	display: none;
+}
+
 /*
  * Expand collapsed folders that have matching children.
  * We never touch is-collapsed on the element itself, so Obsidian's
