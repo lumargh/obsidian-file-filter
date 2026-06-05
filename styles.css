@@ -127,6 +127,15 @@
 	color: var(--text-muted);
 }
 
+/* Match highlight in the editor. Uses an inset box-shadow for the "border"
+   and no padding so it doesn't shift characters or the cursor while typing,
+   while looking like the reading-mode .pf-highlight. */
+.cm-pf-highlight {
+	background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.15);
+	box-shadow: inset 0 0 0 1px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);
+	border-radius: 2px;
+}
+
 .pf-highlight {
 	background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.15);
 	border: 1px solid hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);

@@ -54,6 +54,7 @@ class EllipsisWidget extends WidgetType {
 
 const hiddenLine = Decoration.line({ class: 'cm-pf-no-match' });
 const ellipsis = Decoration.widget({ widget: new EllipsisWidget(), block: true, side: -1 });
+const highlightMark = Decoration.mark({ class: 'cm-pf-highlight' });
 
 // Holds the active query for a given editor.
 const queryField = StateField.define<string>({
@@ -87,10 +88,20 @@ function buildDecorations(state: EditorState): DecorationSet {
 
 	for (let i = 1; i <= doc.lines; i++) {
 		const line = doc.line(i);
+		const lower = line.text.toLowerCase();
 		// Embed lines are handled by EmbedFilter (the widget lives outside the
 		// line flow), so never hide them here.
-		if (cursorLines.has(i) || EMBED_LINE.test(line.text) || line.text.toLowerCase().includes(q)) {
+		const isEmbed = EMBED_LINE.test(line.text);
+		const matches = lower.includes(q);
+		if (cursorLines.has(i) || isEmbed || matches) {
 			inRun = false;
+			// Highlight each occurrence of the query on visible matching lines
+			// (embed widget lines render no editable text, so skip them).
+			if (matches && !isEmbed) {
+				for (let idx = lower.indexOf(q); idx !== -1; idx = lower.indexOf(q, idx + q.length)) {
+					decos.push(highlightMark.range(line.from + idx, line.from + idx + q.length));
+				}
+			}
 			continue;
 		}
 		// Open a new run with one ellipsis widget, then hide every line in it.
