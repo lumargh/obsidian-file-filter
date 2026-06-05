@@ -1,6 +1,5 @@
 // todo
-// 1 edit mode > filter > matching text should have border and background.
-// 2 filter page: right-click selected text > filter by term (broke page filter + edit icons — needs investigation before reimplementing)
+// 1 new feature > filter page: in edit mode, right-click selected text > filter by term
 
 import { MarkdownView, Plugin, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
