@@ -1,6 +1,6 @@
 {
 	"name": "file-filter",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Filter and navigate files based on conditions you supply.",
 	"main": "main.js",
 	"type": "module",
