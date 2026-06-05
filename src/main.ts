@@ -1,8 +1,13 @@
 // todo
-// filter page: right-click selected text > filter by term (broke page filter + edit icons — needs investigation before reimplementing)
+// 1 factor out reading mode > edit functionality. may include in another plugin.
+// 2 edit mode > filter > matching text should have border and background.
+// 3 filter page: right-click selected text > filter by term (broke page filter + edit icons — needs investigation before reimplementing)
 
 import { MarkdownView, Plugin, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
+import { EditorView } from '@codemirror/view';
 import { ParagraphEditor } from './paragraph-editor'; // [paragraph-editor]
+import { createLiveFilter, setFilterQuery } from './live-filter';
+import { applyBlockFilter, clearBlockFilter } from './dom-filter';
 
 interface PageFilterState {
 	query: string;
@@ -16,8 +21,13 @@ export default class FileFilterPlugin extends Plugin {
 	private searchInputEl: HTMLInputElement | null = null;
 	private filterTimer: number | null = null;
 	private paragraphEditors = new Map<HTMLElement, ParagraphEditor>(); // [paragraph-editor]
+	private pageFilters = new Map<HTMLElement, () => void>(); // viewEl → re-apply after a mode switch
 
 	async onload() {
+
+		// Filtering for Live Preview / Source mode is driven by this CM6 editor
+		// extension; reading mode uses the DOM-based filter further below.
+		this.registerEditorExtension(createLiveFilter(this.app));
 
 		this.app.workspace.onLayoutReady(() => {
 			this.initExplorer();
@@ -26,8 +36,12 @@ export default class FileFilterPlugin extends Plugin {
 		this.registerEvent(this.app.workspace.on('layout-change', () => {
 			this.initExplorer();
 			this.initPageFilters();
+			this.reapplyPageFilters();
 		}));
-		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.initPageFilters()));
+		this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
+			this.initPageFilters();
+			this.reapplyPageFilters();
+		}));
 
 		this.addCommand({
 			id: 'toggle-page-filter',
@@ -36,23 +50,16 @@ export default class FileFilterPlugin extends Plugin {
 				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (!view) return;
 
-				const openFilter = () => {
-					const container = view.containerEl.querySelector<HTMLElement>('.pf-search-container');
-					const input = view.containerEl.querySelector<HTMLInputElement>('.pf-search-input');
-					if (!container || !input) return;
-					if (container.classList.contains('ff-hidden')) {
-						view.containerEl.querySelector<HTMLElement>('.pf-search-btn')?.click();
-					} else {
-						input.focus();
-						input.select();
-					}
-				};
-
-				if (view.getMode() !== 'preview') {
-					void view.setState({ ...view.getState(), mode: 'preview' }, { history: false })
-						.then(() => window.setTimeout(openFilter, 50));
+				// Open the filter in whatever mode is active — reading and
+				// Live Preview / Source each have their own implementation.
+				const container = view.containerEl.querySelector<HTMLElement>('.pf-search-container');
+				const input = view.containerEl.querySelector<HTMLInputElement>('.pf-search-input');
+				if (!container || !input) return;
+				if (container.classList.contains('ff-hidden')) {
+					view.containerEl.querySelector<HTMLElement>('.pf-search-btn')?.click();
 				} else {
-					openFilter();
+					input.focus();
+					input.select();
 				}
 			},
 		});
@@ -81,6 +88,7 @@ export default class FileFilterPlugin extends Plugin {
 		activeDocument.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
 		this.paragraphEditors.forEach(e => e.destroy()); // [paragraph-editor]
 		this.paragraphEditors.clear(); // [paragraph-editor]
+		this.pageFilters.clear(); // CM6 decorations are removed by the editor-extension teardown
 	}
 
 	private getExplorerContainer(): HTMLElement | null {
@@ -260,6 +268,18 @@ export default class FileFilterPlugin extends Plugin {
 		this.app.workspace.getLeavesOfType('markdown').forEach(leaf => this.initPageFilter(leaf));
 	}
 
+	// Re-apply any open filter in its current mode (e.g. after a reading ⇄ Live
+	// Preview switch) and prune controllers for closed views.
+	private reapplyPageFilters() {
+		this.pageFilters.forEach((reapply, viewEl) => {
+			if (!viewEl.isConnected) {
+				this.pageFilters.delete(viewEl);
+				return;
+			}
+			reapply();
+		});
+	}
+
 	private initPageFilter(leaf: WorkspaceLeaf) {
 		const viewEl = leaf.view?.containerEl;
 		if (!viewEl) return;
@@ -298,87 +318,60 @@ export default class FileFilterPlugin extends Plugin {
 
 		const state: PageFilterState = { query: '', filterTimer: null };
 
-		const getPreviewSection = () => viewEl.querySelector<HTMLElement>('.markdown-preview-section');
+		// Scope to the active reading view. A bare '.markdown-preview-section'
+		// lookup also matches sections rendered inside the hidden source view
+		// (e.g. Live Preview embeds), which sit earlier in the DOM — querySelector
+		// would then return a hidden section and reading-mode filtering would
+		// silently target the wrong element. The reading view's outermost section
+		// comes first in tree order, so it's the correct match here.
+		const getPreviewSection = () =>
+			viewEl.querySelector<HTMLElement>('.markdown-reading-view .markdown-preview-section');
 
-		const highlightTextNodes = (el: Node, q: string) => {
-			if (el.nodeType === Node.TEXT_NODE) {
-				const text = el.textContent ?? '';
-				const lower = text.toLowerCase();
-				if (!lower.includes(q)) return;
-				const frag = activeDocument.createDocumentFragment();
-				let last = 0;
-				let i = lower.indexOf(q, 0);
-				while (i !== -1) {
-					if (i > last) frag.appendChild(activeDocument.createTextNode(text.slice(last, i)));
-					const span = activeDocument.createElement('span');
-					span.className = 'pf-highlight';
-					span.textContent = text.slice(i, i + q.length);
-					frag.appendChild(span);
-					last = i + q.length;
-					i = lower.indexOf(q, last);
-				}
-				if (last < text.length) frag.appendChild(activeDocument.createTextNode(text.slice(last)));
-				el.parentNode?.replaceChild(frag, el);
-			} else if (el.nodeType === Node.ELEMENT_NODE && !(el as Element).classList.contains('pf-highlight')) {
-				Array.from(el.childNodes).forEach(child => highlightTextNodes(child, q));
-			}
-		};
-
-		const clearHighlights = (root: HTMLElement) => {
-			root.querySelectorAll('.pf-highlight').forEach(span => {
-				const parent = span.parentNode;
-				if (!parent) return;
-				parent.replaceChild(activeDocument.createTextNode(span.textContent ?? ''), span);
-				parent.normalize();
-			});
-		};
-
-		const insertPageEllipses = (section: HTMLElement) => {
-			section.querySelectorAll('.pf-ellipsis').forEach(el => el.remove());
-			const blocks = Array.from(section.querySelectorAll<HTMLElement>(':scope > div'));
-			let i = 0;
-			while (i < blocks.length) {
-				if (blocks[i]!.classList.contains('pf-no-match')) {
-					let end = i;
-					while (end < blocks.length && blocks[end]!.classList.contains('pf-no-match')) end++;
-					const dot = createEl('div', { cls: 'pf-ellipsis', text: '···' });
-					if (end < blocks.length) section.insertBefore(dot, blocks[end]!);
-					else section.appendChild(dot);
-					i = end;
-				} else {
-					i++;
-				}
-			}
-		};
-
-		const applyPageFilter = () => {
-			const q = state.query.trim().toLowerCase();
+		// ── Reading mode (DOM-based) ──────────────────────────────────────────
+		// Block-level filtering lives in dom-filter.ts (shared with embeds).
+		const clearPreviewFilter = () => {
 			const section = getPreviewSection();
-			if (!section) return;
+			if (section) clearBlockFilter(section);
+		};
 
-			clearHighlights(section);
-			section.querySelectorAll('.pf-ellipsis').forEach(el => el.remove());
+		const applyPreviewFilter = () => {
+			const section = getPreviewSection();
+			if (section) applyBlockFilter(section, state.query);
+		};
 
-			if (!q) {
-				section.classList.remove('pf-filtering');
-				section.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
-				return;
+		// ── Live Preview / Source mode (CM6 decorations) ──────────────────────
+		const getCmView = (): EditorView | null => {
+			const editor = (leaf.view as MarkdownView)?.editor as { cm?: EditorView } | undefined;
+			const cm = editor?.cm;
+			return cm?.dom.isConnected ? cm : null;
+		};
+
+		const applySourceFilter = () => {
+			const cm = getCmView();
+			if (cm) cm.dispatch({ effects: setFilterQuery.of(state.query.trim().toLowerCase()) });
+		};
+
+		const clearSourceFilter = () => {
+			const cm = getCmView();
+			if (cm) cm.dispatch({ effects: setFilterQuery.of('') });
+		};
+
+		// ── Dispatch to whichever mode is active ──────────────────────────────
+		// Each mode renders independently, so the inactive mode's leftover state
+		// is never visible — only the active mode is touched here. Cross-mode
+		// cleanup happens on deactivate() and on a mode switch (reapply below).
+		const applyFilter = () => {
+			if ((leaf.view as MarkdownView).getMode() === 'preview') {
+				applyPreviewFilter();
+			} else {
+				applySourceFilter();
 			}
-
-			section.classList.add('pf-filtering');
-			section.querySelectorAll<HTMLElement>(':scope > div').forEach(el => {
-				const text = el.textContent?.toLowerCase() ?? '';
-				const matches = text.includes(q);
-				el.classList.toggle('pf-no-match', !matches);
-				if (matches) highlightTextNodes(el, q);
-			});
-			insertPageEllipses(section);
 		};
 
 		const scheduleCurrentFilter = () => {
 			if (state.filterTimer !== null) window.clearTimeout(state.filterTimer);
 			state.filterTimer = window.setTimeout(() => {
-				applyPageFilter();
+				applyFilter();
 				state.filterTimer = null;
 			}, 50);
 		};
@@ -387,27 +380,21 @@ export default class FileFilterPlugin extends Plugin {
 			searchContainer.classList.add('ff-hidden');
 			searchInput.value = '';
 			state.query = '';
-
-			const section = getPreviewSection();
-			if (section) {
-				clearHighlights(section);
-				section.querySelectorAll('.pf-ellipsis').forEach(el => el.remove());
-				section.classList.remove('pf-filtering');
-				section.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
-			}
+			clearPreviewFilter();
+			clearSourceFilter();
 		};
 
+		// Re-apply the active query after a mode switch (reading ⇄ Live Preview).
+		this.pageFilters.set(viewEl, () => {
+			if (!searchContainer.classList.contains('ff-hidden') && state.query) scheduleCurrentFilter();
+		});
+
 		searchBtn.addEventListener('click', () => {
-			const view = leaf.view as MarkdownView;
-			if (view.getMode() !== 'preview') {
-				void view.setState({ ...view.getState(), mode: 'preview' }, { history: false })
-					.then(() => window.setTimeout(() => {
-						searchContainer.classList.remove('ff-hidden');
-						searchInput.focus();
-					}, 50));
-			} else if (searchContainer.classList.contains('ff-hidden')) {
+			// Open in whatever mode is active — no longer forces reading mode.
+			if (searchContainer.classList.contains('ff-hidden')) {
 				searchContainer.classList.remove('ff-hidden');
 				searchInput.focus();
+				searchInput.select();
 			} else {
 				deactivate();
 			}
@@ -436,9 +423,11 @@ export default class FileFilterPlugin extends Plugin {
 			}
 		});
 
-		// Click an ellipsis → clear the query; Ctrl/Cmd+Z restores it
+		// Click an ellipsis → clear the query; Ctrl/Cmd+Z restores it.
+		// Handles both the reading-mode ellipsis and the CM6 block-widget one.
 		this.registerDomEvent(viewEl, 'click', (e: MouseEvent) => {
-			if (!(e.target as HTMLElement).classList.contains('pf-ellipsis')) return;
+			const target = e.target as HTMLElement;
+			if (!target.classList.contains('pf-ellipsis') && !target.classList.contains('cm-pf-ellipsis')) return;
 			e.preventDefault();
 			e.stopPropagation();
 			previousQuery = searchInput.value;

@@ -99,6 +99,34 @@
 	color: var(--text-muted);
 }
 
+/* Live Preview / Source mode paragraph filter (CM6 decorations) */
+
+.cm-pf-no-match {
+	/* !important to beat CodeMirror's own ".cm-line { display: block }"
+	   (equal specificity, CM's rule otherwise wins by load order). */
+	display: none !important;
+}
+
+/* A whole embed whose file contains no match collapses away. */
+.pf-embed-hidden {
+	display: none !important;
+}
+
+.cm-pf-ellipsis {
+	color: var(--text-faint);
+	font-size: var(--font-ui-small);
+	text-align: center;
+	padding: 2px 0;
+	user-select: none;
+	cursor: pointer;
+	letter-spacing: 0.2em;
+	transition: color 0.1s ease;
+}
+
+.cm-pf-ellipsis:hover {
+	color: var(--text-muted);
+}
+
 .pf-highlight {
 	background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.15);
 	border: 1px solid hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);
