@@ -1,11 +1,9 @@
 // todo
-// 1 factor out reading mode > edit functionality. may include in another plugin.
-// 2 edit mode > filter > matching text should have border and background.
-// 3 filter page: right-click selected text > filter by term (broke page filter + edit icons — needs investigation before reimplementing)
+// 1 edit mode > filter > matching text should have border and background.
+// 2 filter page: right-click selected text > filter by term (broke page filter + edit icons — needs investigation before reimplementing)
 
-import { MarkdownView, Plugin, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
+import { MarkdownView, Plugin, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
-import { ParagraphEditor } from './paragraph-editor'; // [paragraph-editor]
 import { createLiveFilter, setFilterQuery } from './live-filter';
 import { applyBlockFilter, clearBlockFilter } from './dom-filter';
 
@@ -20,7 +18,6 @@ export default class FileFilterPlugin extends Plugin {
 	private searchContainerEl: HTMLElement | null = null;
 	private searchInputEl: HTMLInputElement | null = null;
 	private filterTimer: number | null = null;
-	private paragraphEditors = new Map<HTMLElement, ParagraphEditor>(); // [paragraph-editor]
 	private pageFilters = new Map<HTMLElement, () => void>(); // viewEl → re-apply after a mode switch
 
 	async onload() {
@@ -86,8 +83,6 @@ export default class FileFilterPlugin extends Plugin {
 		activeDocument.querySelectorAll('.pf-search-btn, .pf-search-container, .pf-ellipsis').forEach(el => el.remove());
 		activeDocument.querySelectorAll('.pf-filtering').forEach(el => el.classList.remove('pf-filtering'));
 		activeDocument.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
-		this.paragraphEditors.forEach(e => e.destroy()); // [paragraph-editor]
-		this.paragraphEditors.clear(); // [paragraph-editor]
 		this.pageFilters.clear(); // CM6 decorations are removed by the editor-extension teardown
 	}
 
@@ -436,13 +431,6 @@ export default class FileFilterPlugin extends Plugin {
 			scheduleCurrentFilter();
 			searchInput.focus();
 		});
-
-		// [paragraph-editor]
-		const getFile = (): TFile | null => (leaf.view as MarkdownView)?.file ?? null;
-		const pgEditor = new ParagraphEditor(this.app);
-		this.paragraphEditors.set(viewEl, pgEditor);
-		pgEditor.attach(viewEl, getFile, scheduleCurrentFilter);
-		// [paragraph-editor]
 	}
 
 }
