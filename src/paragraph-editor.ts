@@ -183,6 +183,7 @@ export class ParagraphEditor {
 			.replace(/\*(.+?)\*/gs, '$1')
 			.replace(/`([^`]+)`/g, '$1')
 			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+			.replace(/\[\[([^\]#|]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (_, page, alias) => alias ?? page)
 			.replace(/==(.+?)==/gs, '$1')
 			.replace(/~~(.+?)~~/gs, '$1');
 	}
