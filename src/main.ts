@@ -1,6 +1,5 @@
 // todo
 // filter page: right-click selected text > filter by term (broke page filter + edit icons — needs investigation before reimplementing)
-// filter sidebar: add customizable command to jump focus to the sidebar filter bar
 
 import { MarkdownView, Plugin, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import { ParagraphEditor } from './paragraph-editor'; // [paragraph-editor]
@@ -56,6 +55,12 @@ export default class FileFilterPlugin extends Plugin {
 					openFilter();
 				}
 			},
+		});
+
+		this.addCommand({
+			id: 'focus-file-filter',
+			name: 'Focus file filter',
+			callback: () => this.openSearch(),
 		});
 
 		// Re-apply filter when vault contents change while a filter is active
