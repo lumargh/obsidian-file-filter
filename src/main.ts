@@ -56,7 +56,7 @@ export default class FileFilterPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'toggle-page-filter',
-			name: 'Toggle page filter',
+			name: 'Filter page',
 			callback: () => {
 				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (!view) return;
@@ -77,7 +77,7 @@ export default class FileFilterPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'focus-explorer-filter',
-			name: 'Focus file filter',
+			name: 'Filter sidebar',
 			callback: () => this.openSearch(),
 		});
 
