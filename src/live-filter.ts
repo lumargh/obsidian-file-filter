@@ -42,7 +42,7 @@ class EllipsisWidget extends WidgetType {
 	}
 
 	toDOM(): HTMLElement {
-		const el = document.createElement('div');
+		const el = activeDocument.createElement('div');
 		el.className = 'cm-pf-ellipsis';
 		el.textContent = '···';
 		return el;
@@ -191,10 +191,10 @@ class EmbedFilter implements PluginValue {
 
 		// An edit to an embedded file invalidates its cached match result.
 		this.modifyRef = app.vault.on('modify', (file) => {
-			if (this.matchCache.delete(file.path) && this.query) this.rescan();
+			if (this.matchCache.delete(file.path) && this.query) void this.rescan();
 		});
 
-		if (this.query) this.rescan();
+		if (this.query) void this.rescan();
 	}
 
 	update(update: ViewUpdate): void {
@@ -202,7 +202,7 @@ class EmbedFilter implements PluginValue {
 		if (next !== this.query) {
 			this.query = next;
 			this.matchCache.clear();
-			if (this.query) this.rescan();
+			if (this.query) void this.rescan();
 			else this.scheduleApply(); // clears embeds
 			return;
 		}

@@ -23,7 +23,8 @@ export default class FileFilterPlugin extends Plugin {
 	private pageFilters = new Map<HTMLElement, () => void>(); // viewEl → re-apply after a mode switch
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = (await this.loadData()) as Partial<FileFilterSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 	}
 
 	async saveSettings() {
@@ -75,7 +76,7 @@ export default class FileFilterPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: 'focus-file-filter',
+			id: 'focus-explorer-filter',
 			name: 'Focus file filter',
 			callback: () => this.openSearch(),
 		});
