@@ -29,6 +29,9 @@ import { applyBlockFilter, clearBlockFilter } from './dom-filter';
 // Dispatch this to a CM editor to set the active filter query ('' = no filter).
 export const setFilterQuery = StateEffect.define<string>();
 
+// Dispatch this to toggle ancestor-header preservation for the active filter.
+export const setPreserveStructure = StateEffect.define<boolean>();
+
 // A line that is nothing but an embed, e.g. `![[page]]`.
 const EMBED_LINE = /^\s*!\[\[[^\]]*\]\]\s*$/;
 
@@ -67,11 +70,28 @@ const queryField = StateField.define<string>({
 	},
 });
 
+const preserveStructureField = StateField.define<boolean>({
+	create: () => false,
+	update(value, tr) {
+		for (const e of tr.effects) {
+			if (e.is(setPreserveStructure)) return e.value;
+		}
+		return value;
+	},
+});
+
+// Returns 1–6 for lines starting with that many `#`, 0 otherwise.
+function getHeaderLevel(text: string): number {
+	const m = text.match(/^(#{1,6}) /);
+	return m ? m[1]!.length : 0;
+}
+
 function buildDecorations(state: EditorState): DecorationSet {
 	const q = state.field(queryField).trim().toLowerCase();
 	if (!q) return Decoration.none;
 
 	const doc = state.doc;
+	const preserveStructure = state.field(preserveStructureField);
 
 	// Lines touched by the selection/cursor stay visible regardless of match, so
 	// you can press Enter and edit a new (not-yet-matching) paragraph in place.
@@ -83,46 +103,71 @@ function buildDecorations(state: EditorState): DecorationSet {
 		for (let n = first; n <= last; n++) cursorLines.add(n);
 	}
 
-	const decos = [];
-	let inRun = false; // currently inside a run of consecutive hidden lines
-
+	// Pass 1: classify every line.
+	const lineVisible = new Array<boolean>(doc.lines + 1);
+	const lineMatches = new Array<boolean>(doc.lines + 1); // direct text match only
 	for (let i = 1; i <= doc.lines; i++) {
 		const line = doc.line(i);
 		const lower = line.text.toLowerCase();
-		// Embed lines are handled by EmbedFilter (the widget lives outside the
-		// line flow), so never hide them here.
 		const isEmbed = EMBED_LINE.test(line.text);
 		const matches = lower.includes(q);
-		if (cursorLines.has(i) || isEmbed || matches) {
+		lineMatches[i] = matches && !isEmbed;
+		lineVisible[i] = cursorLines.has(i) || isEmbed || matches;
+	}
+
+	// Pass 2 (optional): for each visible line, un-hide its ancestor headers.
+	if (preserveStructure) {
+		const stack: Array<{ level: number; lineNum: number }> = [];
+		for (let i = 1; i <= doc.lines; i++) {
+			const level = getHeaderLevel(doc.line(i).text);
+			if (level > 0) {
+				while (stack.length > 0 && stack[stack.length - 1]!.level >= level) {
+					stack.pop();
+				}
+				stack.push({ level, lineNum: i });
+			}
+			if (lineVisible[i]) {
+				for (const h of stack) lineVisible[h.lineNum] = true;
+			}
+		}
+	}
+
+	// Pass 3: build decorations.
+	const decos = [];
+	let inRun = false;
+
+	for (let i = 1; i <= doc.lines; i++) {
+		if (lineVisible[i]) {
 			inRun = false;
-			// Highlight each occurrence of the query on visible matching lines
-			// (embed widget lines render no editable text, so skip them).
-			if (matches && !isEmbed) {
+			if (lineMatches[i]) {
+				const line = doc.line(i);
+				const lower = line.text.toLowerCase();
 				for (let idx = lower.indexOf(q); idx !== -1; idx = lower.indexOf(q, idx + q.length)) {
 					decos.push(highlightMark.range(line.from + idx, line.from + idx + q.length));
 				}
 			}
 			continue;
 		}
-		// Open a new run with one ellipsis widget, then hide every line in it.
 		if (!inRun) {
-			decos.push(ellipsis.range(line.from));
+			decos.push(ellipsis.range(doc.line(i).from));
 			inRun = true;
 		}
-		decos.push(hiddenLine.range(line.from));
+		decos.push(hiddenLine.range(doc.line(i).from));
 	}
 
 	return Decoration.set(decos, true);
 }
 
-// queryField is declared before decoField so that, within a single transaction,
-// decoField sees the already-updated query via tr.state.field(queryField).
+// queryField and preserveStructureField are declared before decoField so that,
+// within a single transaction, decoField sees their already-updated values.
 const decoField = StateField.define<DecorationSet>({
 	create: (state) => buildDecorations(state),
 	update(value, tr) {
-		const queryChanged = tr.effects.some((e) => e.is(setFilterQuery));
+		const filterChanged = tr.effects.some(
+			(e) => e.is(setFilterQuery) || e.is(setPreserveStructure),
+		);
 		// Recompute on selection moves too, so the cursor's line stays exempt.
-		if (queryChanged || tr.docChanged || tr.selection) return buildDecorations(tr.state);
+		if (filterChanged || tr.docChanged || tr.selection) return buildDecorations(tr.state);
 		return value.map(tr.changes);
 	},
 	provide: (f) => EditorView.decorations.from(f),
@@ -229,6 +274,7 @@ class EmbedFilter implements PluginValue {
 
 	private applyEmbeds(): void {
 		const sourcePath = this.hostPath();
+		const preserveStructure = this.view.state.field(preserveStructureField);
 		for (const el of this.embedEls()) {
 			const section = el.querySelector<HTMLElement>('.markdown-preview-section');
 			if (!this.query) {
@@ -242,7 +288,7 @@ class EmbedFilter implements PluginValue {
 
 			el.classList.toggle('pf-embed-hidden', !matches);
 			if (section) {
-				if (matches) applyBlockFilter(section, this.query);
+				if (matches) applyBlockFilter(section, this.query, { preserveStructure });
 				else clearBlockFilter(section);
 			}
 		}
@@ -259,5 +305,5 @@ class EmbedFilter implements PluginValue {
 
 // Build the editor extension. Needs App for resolving/reading embedded files.
 export function createLiveFilter(app: App): Extension {
-	return [queryField, decoField, ViewPlugin.define((view) => new EmbedFilter(view, app))];
+	return [queryField, preserveStructureField, decoField, ViewPlugin.define((view) => new EmbedFilter(view, app))];
 }

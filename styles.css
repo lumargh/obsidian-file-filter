@@ -84,6 +84,11 @@
 	display: none;
 }
 
+/* Ancestor items whose own text is hidden but whose nested list must stay visible. */
+.pf-filtering li.pf-passthrough {
+	list-style: none;
+}
+
 .pf-ellipsis {
 	color: var(--text-faint);
 	font-size: var(--font-ui-small);

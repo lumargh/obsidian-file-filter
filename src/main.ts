@@ -3,8 +3,9 @@
 
 import { MarkdownView, Plugin, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
-import { createLiveFilter, setFilterQuery } from './live-filter';
+import { createLiveFilter, setFilterQuery, setPreserveStructure } from './live-filter';
 import { applyBlockFilter, clearBlockFilter } from './dom-filter';
+import { DEFAULT_SETTINGS, FileFilterSettings, FileFilterSettingTab } from './settings';
 
 interface PageFilterState {
 	query: string;
@@ -12,6 +13,8 @@ interface PageFilterState {
 }
 
 export default class FileFilterPlugin extends Plugin {
+	settings: FileFilterSettings = { ...DEFAULT_SETTINGS };
+
 	private filterQuery = '';
 	private filterActive = false;
 	private searchContainerEl: HTMLElement | null = null;
@@ -19,7 +22,18 @@ export default class FileFilterPlugin extends Plugin {
 	private filterTimer: number | null = null;
 	private pageFilters = new Map<HTMLElement, () => void>(); // viewEl → re-apply after a mode switch
 
+	async loadSettings() {
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+	}
+
+	async saveSettings() {
+		await this.saveData(this.settings);
+		this.reapplyPageFilters();
+	}
+
 	async onload() {
+		await this.loadSettings();
+		this.addSettingTab(new FileFilterSettingTab(this.app, this));
 
 		// Filtering for Live Preview / Source mode is driven by this CM6 editor
 		// extension; reading mode uses the DOM-based filter further below.
@@ -330,7 +344,7 @@ export default class FileFilterPlugin extends Plugin {
 
 		const applyPreviewFilter = () => {
 			const section = getPreviewSection();
-			if (section) applyBlockFilter(section, state.query);
+			if (section) applyBlockFilter(section, state.query, { preserveStructure: this.settings.preserveStructure });
 		};
 
 		// ── Live Preview / Source mode (CM6 decorations) ──────────────────────
@@ -342,7 +356,12 @@ export default class FileFilterPlugin extends Plugin {
 
 		const applySourceFilter = () => {
 			const cm = getCmView();
-			if (cm) cm.dispatch({ effects: setFilterQuery.of(state.query.trim().toLowerCase()) });
+			if (cm) cm.dispatch({
+				effects: [
+					setFilterQuery.of(state.query.trim().toLowerCase()),
+					setPreserveStructure.of(this.settings.preserveStructure),
+				],
+			});
 		};
 
 		const clearSourceFilter = () => {

@@ -39,6 +39,23 @@ Type anything — non-matching paragraphs are hidden and replaced by a **···*
 - Press **Cmd/Ctrl+Z** after clicking **···** to restore the previous query
 - The filter icon and search bar are hidden in source and live-preview mode
 
+### Preserve structure (setting)
+
+Enable **Preserve structure** in Settings → File Filter to keep ancestor headers visible when filtering a page.
+
+Without this setting, only blocks whose text contains the search term are shown. With it enabled, any header that sits above a matching block in the document hierarchy is also shown — even if the header itself does not contain the search term.
+
+**Example:** searching `apple` in a note structured as:
+
+```
+# Fruit Notes
+## Varieties
+A paragraph about apples.
+```
+
+Without *Preserve structure*: only the paragraph is shown.  
+With *Preserve structure*: `# Fruit Notes`, `## Varieties`, and the paragraph are all shown.
+
 ---
 
 ## Paragraph inline editor (reading mode)
