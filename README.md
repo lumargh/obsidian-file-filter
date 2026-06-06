@@ -6,6 +6,8 @@ An [Obsidian](https://obsidian.md) plugin with two features: a live filter for t
 
 ## Editor inline filter
 
+![Paragraph filter demo](assets/paragraph-filter-demo.gif)
+
 Click the **filter icon** in the note header (or press the customizable hotkey **Cmd+F**). A search field appears below the header.
 
 Type anything — non-matching paragraphs are hidden and replaced by a **···** ellipsis. Matching text is highlighted inline.
