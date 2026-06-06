@@ -201,7 +201,6 @@ function hideOwnContent(li: HTMLElement): void {
 	if (nodes.length === 0) return;
 	const wrapper = activeDocument.createElement('span');
 	wrapper.className = 'pf-passthrough-content';
-	wrapper.style.display = 'none';
 	li.insertBefore(wrapper, nodes[0]!);
 	nodes.forEach(n => wrapper.appendChild(n));
 }
