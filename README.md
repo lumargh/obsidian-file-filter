@@ -41,6 +41,8 @@ Type anything — non-matching paragraphs are hidden and replaced by a **···*
 
 ### Preserve structure (setting)
 
+![Preserve structure demo](assets/preserve-structure-demo.gif)
+
 Enable **Preserve structure** in Settings → File Filter to keep ancestor headers visible when filtering a page.
 
 Without this setting, only blocks whose text contains the search term are shown. With it enabled, any header that sits above a matching block in the document hierarchy is also shown — even if the header itself does not contain the search term.
