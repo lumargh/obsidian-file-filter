@@ -100,6 +100,79 @@ function insertEllipsisRuns(container: HTMLElement, items: HTMLElement[]): void 
 	}
 }
 
+// Ellipses are inserted independently at the section level and inside every
+// nested list, so a single visual gap (e.g. several collapsed items spanning a
+// list boundary or a chain of nested lists) can produce a stack of adjacent
+// "···" markers. This pass walks the rendered section in document order and
+// collapses each run of ellipses with no visible content between them into one,
+// keeping the shallowest (least-indented) marker so it reads as a clean break.
+function mergeAdjacentEllipses(section: HTMLElement): void {
+	const runs: HTMLElement[][] = [];
+	let current: HTMLElement[] = [];
+	const flush = (): void => {
+		if (current.length) {
+			runs.push(current);
+			current = [];
+		}
+	};
+
+	const walk = (node: Node): void => {
+		if (node.nodeType === Node.TEXT_NODE) {
+			if ((node.textContent ?? '').trim().length > 0) flush();
+			return;
+		}
+		if (node.nodeType !== Node.ELEMENT_NODE) return;
+		const el = node as HTMLElement;
+
+		// Hidden subtrees render nothing, so they neither break a run nor count.
+		if (
+			el.classList.contains('pf-no-match') ||
+			el.classList.contains('pf-embed-hidden') ||
+			el.classList.contains('pf-passthrough-content') ||
+			el.style.display === 'none'
+		) {
+			return;
+		}
+
+		if (el.classList.contains('pf-ellipsis')) {
+			current.push(el);
+			return; // don't descend — its "···" text isn't real content
+		}
+
+		// Visible media counts as content even though it carries no text.
+		if (el.tagName === 'IMG') {
+			flush();
+			return;
+		}
+
+		Array.from(el.childNodes).forEach(walk);
+	};
+
+	walk(section);
+	flush();
+
+	const listDepth = (el: HTMLElement): number => {
+		let depth = 0;
+		let p = el.parentElement;
+		while (p && p !== section) {
+			if (p.tagName === 'UL' || p.tagName === 'OL') depth++;
+			p = p.parentElement;
+		}
+		return depth;
+	};
+
+	for (const run of runs) {
+		if (run.length <= 1) continue;
+		let keep = run[0]!;
+		for (const e of run) {
+			if (listDepth(e) < listDepth(keep)) keep = e;
+		}
+		for (const e of run) {
+			if (e !== keep) e.remove();
+		}
+	}
+}
+
 // An <li>'s own text, excluding any nested sub-lists.
 function liOwnText(li: HTMLElement): string {
 	let text = '';
@@ -250,5 +323,8 @@ export function applyBlockFilter(
 	if (opts.preserveStructure) preserveAncestorHeaders(blocks);
 
 	insertEllipsisRuns(section, blocks);
+	// Collapse ellipses that ended up stacked across list/section boundaries.
+	// Idempotent, so running it during embed recursion as well is harmless.
+	mergeAdjacentEllipses(section);
 	return blocks.some(b => !b.classList.contains('pf-no-match'));
 }
