@@ -69,6 +69,9 @@
 	display: flex;
 	align-items: center;
 	gap: 16px;
+	/* Line up with the input's left edge: exclude toggle width
+	   (icon + horizontal padding) plus the row gap. */
+	margin-left: calc(var(--icon-size) + 2 * var(--size-2-3) + 4px);
 }
 
 .pf-search-option {
