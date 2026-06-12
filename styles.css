@@ -51,11 +51,44 @@
 
 .pf-search-container {
 	display: flex;
-	align-items: center;
+	flex-direction: column;
+	align-items: stretch;
 	gap: 4px;
 	padding: 4px 12px;
 	border-bottom: 1px solid var(--background-modifier-border);
 	background: var(--background-primary);
+}
+
+.pf-search-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.pf-search-options {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+}
+
+.pf-search-option {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	user-select: none;
+	cursor: pointer;
+}
+
+.pf-search-option input[type='checkbox'] {
+	margin: 0;
+}
+
+/* 'Show ellipses' off — hide the separators in both reading mode and CM6 */
+.pf-no-ellipses .pf-ellipsis,
+.pf-no-ellipses .cm-pf-ellipsis {
+	display: none;
 }
 
 .pf-search-input {

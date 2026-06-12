@@ -3,10 +3,12 @@ import type FileFilterPlugin from './main';
 
 export interface FileFilterSettings {
 	preserveStructure: boolean;
+	showEllipses: boolean;
 }
 
 export const DEFAULT_SETTINGS: FileFilterSettings = {
 	preserveStructure: false,
+	showEllipses: true,
 };
 
 export class FileFilterSettingTab extends PluginSettingTab {
@@ -32,6 +34,18 @@ export class FileFilterSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.preserveStructure)
 					.onChange(async (value) => {
 						this.plugin.settings.preserveStructure = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Show ellipses')
+			.setDesc('Show a ··· separator where filtered-out content is hidden.')
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.showEllipses)
+					.onChange(async (value) => {
+						this.plugin.settings.showEllipses = value;
 						await this.plugin.saveSettings();
 					}),
 			);
