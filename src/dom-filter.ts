@@ -4,6 +4,8 @@
 // blocks are filtered whole. Runs of hidden blocks/items collapse into a
 // clickable ellipsis, and matched substrings are highlighted.
 
+import { TaskKind, taskKind } from './matcher';
+
 // Section children that aren't filterable content.
 function isNonContent(el: Element): boolean {
 	return el.classList.contains('markdown-preview-pusher') || el.classList.contains('mod-header');
@@ -173,6 +175,14 @@ function mergeAdjacentEllipses(section: HTMLElement): void {
 	}
 }
 
+// Rendered task items carry the checkbox state in data-task: 'x' when done,
+// ' ' (or unset) when open. Mirrors taskLineMatches for raw markdown.
+function liTaskMatch(li: HTMLElement, kind: TaskKind): boolean {
+	if (!li.classList.contains('task-list-item')) return false;
+	const task = (li.getAttribute('data-task') ?? ' ').toLowerCase();
+	return kind === 'done' ? task === 'x' : task.trim() === '';
+}
+
 // An <li>'s own text, excluding any nested sub-lists.
 function liOwnText(li: HTMLElement): string {
 	let text = '';
@@ -213,32 +223,38 @@ function restoreOwnContent(li: HTMLElement): void {
 	wrapper.remove();
 }
 
-// Filter a single list per-item.
-//  • ownMatch  → shown with highlighting; nested lists filtered recursively.
+// Filter a single list per-item. "Kept" means the item's own text should stay
+// visible: a match in include mode, a non-match in exclude mode.
+//  • kept      → shown (highlighted in include mode); nested lists filtered recursively.
 //  • childKept → own text hidden (passthrough), nested list kept visible.
 //  • neither   → hidden entirely (pf-no-match).
-// Returns true if any item is visible (matched or passthrough with visible content).
-function filterList(list: HTMLElement, q: string): boolean {
+// Returns true if any item is visible (kept or passthrough with visible content).
+function filterList(list: HTMLElement, q: string, exclude: boolean): boolean {
 	const items = Array.from(list.children).filter(
 		c => c.tagName === 'LI' && !c.classList.contains('pf-ellipsis'),
 	) as HTMLElement[];
 
+	const kind = taskKind(q);
 	let anyKept = false;
 	for (const li of items) {
-		const ownMatch = liOwnText(li).toLowerCase().includes(q);
+		const ownMatch = liOwnText(li).toLowerCase().includes(q)
+			|| (kind !== null && liTaskMatch(li, kind));
+		const keepOwn = exclude ? !ownMatch : ownMatch;
 		const nestedLists = Array.from(li.children).filter(
 			c => c.tagName === 'UL' || c.tagName === 'OL',
 		) as HTMLElement[];
 
-		if (ownMatch) {
+		if (keepOwn) {
 			li.classList.remove('pf-no-match', 'pf-passthrough');
+			restoreOwnContent(li);
 			anyKept = true;
-			highlightTextNodes(li, q); // own text only (UL/OL skipped)
-			for (const nested of nestedLists) filterList(nested, q);
+			// No highlighting in exclude mode — kept text doesn't contain the query.
+			if (!exclude) highlightTextNodes(li, q); // own text only (UL/OL skipped)
+			for (const nested of nestedLists) filterList(nested, q, exclude);
 		} else {
 			let childKept = false;
 			for (const nested of nestedLists) {
-				if (filterList(nested, q)) childKept = true;
+				if (filterList(nested, q, exclude)) childKept = true;
 			}
 			if (childKept) {
 				li.classList.remove('pf-no-match');
@@ -270,11 +286,13 @@ export function clearBlockFilter(section: HTMLElement): void {
 }
 
 // Filter a rendered section in place. An empty query clears the filter.
+// With opts.exclude, the match is inverted: blocks containing the query are
+// hidden and everything else is kept (no highlighting — kept text has no match).
 // Returns true if any block was kept (used when recursing into embeds).
 export function applyBlockFilter(
 	section: HTMLElement,
 	query: string,
-	opts: { preserveStructure?: boolean } = {},
+	opts: { preserveStructure?: boolean; exclude?: boolean } = {},
 ): boolean {
 	const q = query.trim().toLowerCase();
 
@@ -302,20 +320,22 @@ export function applyBlockFilter(
 			: el.querySelector<HTMLElement>('.internal-embed.markdown-embed');
 		if (embed) {
 			const inner = embed.querySelector<HTMLElement>('.markdown-preview-section');
+			const innerMatch = (el.textContent?.toLowerCase() ?? '').includes(q);
 			const kept = inner
 				? applyBlockFilter(inner, q, opts)
-				: (el.textContent?.toLowerCase() ?? '').includes(q);
+				: (opts.exclude ? !innerMatch : innerMatch);
 			el.classList.toggle('pf-no-match', !kept);
 		} else if (el.classList.contains('el-ul') || el.classList.contains('el-ol')) {
 			// List blocks filter per-item to match Live Preview's line granularity.
 			const list = el.querySelector<HTMLElement>('ul, ol');
-			const anyKept = list ? filterList(list, q) : false;
+			const anyKept = list ? filterList(list, q, opts.exclude ?? false) : false;
 			el.classList.toggle('pf-no-match', !anyKept);
 		} else {
 			const text = el.textContent?.toLowerCase() ?? '';
 			const matches = text.includes(q);
-			el.classList.toggle('pf-no-match', !matches);
-			if (matches) highlightTextNodes(el, q);
+			const keep = opts.exclude ? !matches : matches;
+			el.classList.toggle('pf-no-match', !keep);
+			if (keep && !opts.exclude) highlightTextNodes(el, q);
 		}
 	});
 

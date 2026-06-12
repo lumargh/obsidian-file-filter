@@ -15,6 +15,16 @@ Type anything — non-matching paragraphs are hidden and replaced by a **···*
 - Click **···** or press **Escape** to clear the filter
 - Press **Cmd/Ctrl+Z** after clicking **···** to restore the previous query
 - Untick **Show ellipses** (in settings or under the filter input) to hide the **···** separators entirely
+- Click the **filter icon at the left of the search bar** to switch to *exclude* mode — matching paragraphs are hidden instead of shown (e.g. filter out `done` tasks). Click again to switch back; closing the bar resets to include mode.
+
+### Task keywords
+
+Three queries also match task syntax, on top of normal text matching:
+
+- `task` or `todo` — also matches unchecked tasks (`- [ ]`)
+- `done` — also matches completed tasks (`- [x]`)
+
+So typing `todo` shows every open task on the page, and switching to exclude mode with `done` hides everything already completed. Only the exact keyword triggers this — `done tasks` is matched as plain text.
 
 > **Note:** the filter is designed for editing mode (Live Preview / Source). Filtering in reading mode also works but is known to be buggy.
 

@@ -25,6 +25,7 @@ import {
 	WidgetType,
 } from '@codemirror/view';
 import { applyBlockFilter, clearBlockFilter } from './dom-filter';
+import { taskContentMatches, taskKind, taskLineMatches } from './matcher';
 
 // Dispatch this to a CM editor to set the active filter query ('' = no filter).
 export const setFilterQuery = StateEffect.define<string>();
@@ -34,6 +35,9 @@ export const setPreserveStructure = StateEffect.define<boolean>();
 
 // Dispatch this to toggle the "···" markers for hidden runs.
 export const setShowEllipses = StateEffect.define<boolean>();
+
+// Dispatch this to invert the filter: hide matching lines, keep the rest.
+export const setExcludeMode = StateEffect.define<boolean>();
 
 // A line that is nothing but an embed, e.g. `![[page]]`.
 const EMBED_LINE = /^\s*!\[\[[^\]]*\]\]\s*$/;
@@ -93,6 +97,16 @@ const showEllipsesField = StateField.define<boolean>({
 	},
 });
 
+const excludeField = StateField.define<boolean>({
+	create: () => false,
+	update(value, tr) {
+		for (const e of tr.effects) {
+			if (e.is(setExcludeMode)) return e.value;
+		}
+		return value;
+	},
+});
+
 // Returns 1–6 for lines starting with that many `#`, 0 otherwise.
 function getHeaderLevel(text: string): number {
 	const m = text.match(/^(#{1,6}) /);
@@ -106,6 +120,7 @@ function buildDecorations(state: EditorState): DecorationSet {
 	const doc = state.doc;
 	const preserveStructure = state.field(preserveStructureField);
 	const showEllipses = state.field(showEllipsesField);
+	const exclude = state.field(excludeField);
 
 	// Lines touched by the selection/cursor stay visible regardless of match, so
 	// you can press Enter and edit a new (not-yet-matching) paragraph in place.
@@ -120,13 +135,18 @@ function buildDecorations(state: EditorState): DecorationSet {
 	// Pass 1: classify every line.
 	const lineVisible = new Array<boolean>(doc.lines + 1);
 	const lineMatches = new Array<boolean>(doc.lines + 1); // direct text match only
+	const kind = taskKind(q);
 	for (let i = 1; i <= doc.lines; i++) {
 		const line = doc.line(i);
 		const lower = line.text.toLowerCase();
 		const isEmbed = EMBED_LINE.test(line.text);
-		const matches = lower.includes(q);
-		lineMatches[i] = matches && !isEmbed;
-		lineVisible[i] = cursorLines.has(i) || isEmbed || matches;
+		const literal = lower.includes(q);
+		const matches = literal || (kind !== null && taskLineMatches(line.text, kind));
+		const keep = exclude ? !matches : matches;
+		// Highlight only literal occurrences (and none in exclude mode — kept
+		// lines don't contain the query there).
+		lineMatches[i] = !exclude && literal && !isEmbed;
+		lineVisible[i] = cursorLines.has(i) || isEmbed || keep;
 	}
 
 	// Pass 2 (optional): for each visible line, un-hide its ancestor headers.
@@ -178,7 +198,7 @@ const decoField = StateField.define<DecorationSet>({
 	create: (state) => buildDecorations(state),
 	update(value, tr) {
 		const filterChanged = tr.effects.some(
-			(e) => e.is(setFilterQuery) || e.is(setPreserveStructure) || e.is(setShowEllipses),
+			(e) => e.is(setFilterQuery) || e.is(setPreserveStructure) || e.is(setShowEllipses) || e.is(setExcludeMode),
 		);
 		// Recompute on selection moves too, so the cursor's line stays exempt.
 		if (filterChanged || tr.docChanged || tr.selection) return buildDecorations(tr.state);
@@ -193,6 +213,7 @@ const decoField = StateField.define<DecorationSet>({
 // it's correct even before an embed scrolls into view.
 class EmbedFilter implements PluginValue {
 	private query = '';
+	private exclude = false;
 	private matchCache = new Map<string, boolean>(); // file path → content matches query
 	private scanToken = 0;
 	private rafId = 0;
@@ -202,6 +223,7 @@ class EmbedFilter implements PluginValue {
 	constructor(private view: EditorView, private app: App) {
 		this.win = view.dom.ownerDocument.defaultView ?? window;
 		this.query = view.state.field(queryField).trim().toLowerCase();
+		this.exclude = view.state.field(excludeField);
 
 		// An edit to an embedded file invalidates its cached match result.
 		this.modifyRef = app.vault.on('modify', (file) => {
@@ -213,11 +235,20 @@ class EmbedFilter implements PluginValue {
 
 	update(update: ViewUpdate): void {
 		const next = update.state.field(queryField).trim().toLowerCase();
+		const nextExclude = update.state.field(excludeField);
 		if (next !== this.query) {
 			this.query = next;
+			this.exclude = nextExclude;
 			this.matchCache.clear();
 			if (this.query) void this.rescan();
 			else this.scheduleApply(); // clears embeds
+			return;
+		}
+		if (nextExclude !== this.exclude) {
+			// The cache stores raw "content contains query" — still valid;
+			// only the visibility interpretation flips.
+			this.exclude = nextExclude;
+			this.scheduleApply();
 			return;
 		}
 		// Re-apply when the rendered DOM may have changed (e.g. an embed scrolled
@@ -263,10 +294,12 @@ class EmbedFilter implements PluginValue {
 			if (file && !this.matchCache.has(file.path)) files.set(file.path, file);
 		}
 
+		const kind = taskKind(this.query);
 		for (const [path, file] of files) {
 			let matches = false;
 			try {
-				matches = (await this.app.vault.cachedRead(file)).toLowerCase().includes(this.query);
+				const content = (await this.app.vault.cachedRead(file)).toLowerCase();
+				matches = content.includes(this.query) || (kind !== null && taskContentMatches(content, kind));
 			} catch {
 				matches = false;
 			}
@@ -297,12 +330,15 @@ class EmbedFilter implements PluginValue {
 				continue;
 			}
 			const file = this.fileFor(el, sourcePath);
-			const matches = file ? this.matchCache.get(file.path) : undefined;
-			if (matches === undefined) continue; // not scanned yet
+			const raw = file ? this.matchCache.get(file.path) : undefined;
+			if (raw === undefined) continue; // not scanned yet
 
-			el.classList.toggle('pf-embed-hidden', !matches);
+			// In exclude mode the embed shell stays visible — the inner block
+			// filter hides the matching paragraphs (possibly all of them).
+			const keep = this.exclude || raw;
+			el.classList.toggle('pf-embed-hidden', !keep);
 			if (section) {
-				if (matches) applyBlockFilter(section, this.query, { preserveStructure });
+				if (keep) applyBlockFilter(section, this.query, { preserveStructure, exclude: this.exclude });
 				else clearBlockFilter(section);
 			}
 		}
@@ -319,5 +355,5 @@ class EmbedFilter implements PluginValue {
 
 // Build the editor extension. Needs App for resolving/reading embedded files.
 export function createLiveFilter(app: App): Extension {
-	return [queryField, preserveStructureField, showEllipsesField, decoField, ViewPlugin.define((view) => new EmbedFilter(view, app))];
+	return [queryField, preserveStructureField, showEllipsesField, excludeField, decoField, ViewPlugin.define((view) => new EmbedFilter(view, app))];
 }

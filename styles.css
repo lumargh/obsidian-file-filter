@@ -113,6 +113,16 @@
 	color: var(--text-muted);
 }
 
+.pf-exclude-toggle {
+	flex-shrink: 0;
+	color: var(--text-muted);
+}
+
+.pf-exclude-toggle.is-active {
+	color: var(--text-on-accent);
+	background: var(--interactive-accent);
+}
+
 .pf-filtering .pf-no-match {
 	display: none;
 }
@@ -153,6 +163,17 @@
 /* A whole embed whose file contains no match collapses away. */
 .pf-embed-hidden {
 	display: none !important;
+}
+
+/* Obsidian sets an inline min-height on each embed's preview sizer, reserving
+   space for the full unfiltered content. Collapse it while the embed's section
+   is being filtered so the embed shrinks to its visible content. */
+/* The sizer and section are one element in current Obsidian; older layouts
+   nest the section inside the sizer — cover both. !important beats the
+   inline style. */
+.markdown-embed .markdown-preview-section.pf-filtering,
+.markdown-embed .markdown-preview-sizer:has(> .markdown-preview-section.pf-filtering) {
+	min-height: unset !important;
 }
 
 .cm-pf-ellipsis {
