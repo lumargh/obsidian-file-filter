@@ -15,7 +15,14 @@ Type anything and watch non-matching paragraphs be hidden. Optionally, you can c
 - Click **···** or press **Escape** to clear the filter
 - Press **Cmd/Ctrl+Z** after clicking **···** to restore the previous query
 - Untick **Show ellipses** (in settings or under the filter input) to hide the **···** separators entirely
-- Click the **filter icon at the left of the search bar** to switch to *exclude* mode — matching paragraphs are hidden instead of shown (e.g. filter out `done` tasks). Click again to switch back; closing the bar resets to include mode.
+
+### Filter words out
+
+You can also use the filter in reverse: hide every paragraph that *contains* a word, and keep the rest.
+
+Click the **filter icon at the left of the search bar** to switch to exclude mode — the icon gains an accent and the placeholder changes to *Filter out paragraphs…*. Type a word and matching paragraphs disappear instead of being shown.
+
+Click the icon again to switch back. Closing the filter bar resets to normal (include) mode.
 
 ### Task keywords
 
