@@ -7,7 +7,7 @@
 
 import { MarkdownView, Plugin, View, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
-import { createLiveFilter, setFilterQuery, setPreserveStructure } from './live-filter';
+import { createLiveFilter, setFilterQuery, setPreserveStructure, setShowEllipses } from './live-filter';
 import { applyBlockFilter, clearBlockFilter } from './dom-filter';
 import { DEFAULT_SETTINGS, FileFilterSettings, FileFilterSettingTab } from './settings';
 
@@ -48,7 +48,21 @@ export default class FileFilterPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.syncEllipsesClass();
 		this.reapplyPageFilters();
+	}
+
+	// 'Show ellipses' is global, so it's driven by a single class on each
+	// window's <body> (main window and popouts). A class on the view container
+	// would be wiped whenever Obsidian rewrites that element's classes.
+	private syncEllipsesClass(remove = false) {
+		const bodies = new Set<HTMLElement>([activeDocument.body]);
+		this.app.workspace.iterateAllLeaves(leaf => {
+			const body = leaf.view?.containerEl.ownerDocument.body;
+			if (body) bodies.add(body);
+		});
+		const hide = !remove && !this.settings.showEllipses;
+		bodies.forEach(body => body.classList.toggle('pf-no-ellipses', hide));
 	}
 
 	async onload() {
@@ -62,11 +76,13 @@ export default class FileFilterPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			this.initExplorer();
 			this.initPageFilters();
+			this.syncEllipsesClass();
 		});
 		this.registerEvent(this.app.workspace.on('layout-change', () => {
 			this.initExplorer();
 			this.initPageFilters();
 			this.reapplyPageFilters();
+			this.syncEllipsesClass(); // covers newly opened popout windows
 		}));
 		this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
 			this.initPageFilters();
@@ -113,6 +129,7 @@ export default class FileFilterPlugin extends Plugin {
 
 	onunload() {
 		if (this.filterTimer !== null) window.clearTimeout(this.filterTimer);
+		this.syncEllipsesClass(true);
 
 		const container = this.getExplorerContainer();
 		if (container) {
@@ -385,17 +402,44 @@ export default class FileFilterPlugin extends Plugin {
 
 		const searchContainer = createEl('div', { cls: 'pf-search-container ff-hidden' });
 
-		const searchInput = searchContainer.createEl('input', {
+		const searchRow = searchContainer.createEl('div', { cls: 'pf-search-row' });
+		const searchInput = searchRow.createEl('input', {
 			type: 'text',
 			cls: 'pf-search-input',
 			placeholder: 'Filter paragraphs…',
 			attr: { spellcheck: 'false' },
 		});
-		const clearBtn = searchContainer.createEl('button', {
+		const clearBtn = searchRow.createEl('button', {
 			cls: 'clickable-icon pf-search-clear',
 			attr: { 'aria-label': 'Clear filter' },
 		});
 		setIcon(clearBtn, 'x');
+
+		// Inline mirrors of the plugin settings — toggling one here changes the
+		// setting itself, so the settings tab and every open filter follow.
+		const optionsRow = searchContainer.createEl('div', { cls: 'pf-search-options' });
+		const addOption = (label: string, apply: (checked: boolean) => void): HTMLInputElement => {
+			const option = optionsRow.createEl('label', { cls: 'pf-search-option' });
+			const checkbox = option.createEl('input', { type: 'checkbox' });
+			option.appendText(label);
+			checkbox.addEventListener('change', () => {
+				apply(checkbox.checked);
+				void this.saveSettings(); // re-applies every open filter
+			});
+			return checkbox;
+		};
+		const preserveToggle = addOption('Preserve structure', checked => {
+			this.settings.preserveStructure = checked;
+		});
+		const ellipsesToggle = addOption('Show ellipses', checked => {
+			this.settings.showEllipses = checked;
+		});
+
+		const syncOptions = () => {
+			preserveToggle.checked = this.settings.preserveStructure;
+			ellipsesToggle.checked = this.settings.showEllipses;
+		};
+		syncOptions();
 
 		const viewHeader = viewEl.querySelector('.view-header');
 		if (viewHeader) {
@@ -457,6 +501,7 @@ export default class FileFilterPlugin extends Plugin {
 				effects: [
 					setFilterQuery.of(state.query.trim().toLowerCase()),
 					setPreserveStructure.of(this.settings.preserveStructure),
+					setShowEllipses.of(this.settings.showEllipses),
 				],
 			});
 		};
@@ -560,6 +605,9 @@ export default class FileFilterPlugin extends Plugin {
 
 		this.pageFilters.set(viewEl, {
 			reapply: () => {
+				// Keep the inline toggles in sync when a setting changed
+				// elsewhere (settings tab or another view's toggle).
+				syncOptions();
 				if (searchContainer.classList.contains('ff-hidden')) return;
 				// The same leaf can be reused for a different file — drop the
 				// filter rather than carry a stale query across files.

@@ -1,6 +1,6 @@
 # File Filter
 
-An [Obsidian](https://obsidian.md) plugin with two features: a live filter for the Files pane, and a paragraph-level filter and inline editor for reading mode.
+An [Obsidian](https://obsidian.md) plugin with two features: a live filter for the Files pane, and a paragraph-level filter for the editor.
 
 ---
 
@@ -14,13 +14,15 @@ Type anything — non-matching paragraphs are hidden and replaced by a **···*
 
 - Click **···** or press **Escape** to clear the filter
 - Press **Cmd/Ctrl+Z** after clicking **···** to restore the previous query
-- The filter icon and search bar are hidden in source and live-preview mode
+- Untick **Show ellipses** (in settings or under the filter input) to hide the **···** separators entirely
+
+> **Note:** the filter is designed for editing mode (Live Preview / Source). Filtering in reading mode also works but is known to be buggy.
 
 ### Preserve structure (setting)
 
 ![Preserve structure demo](assets/preserve-structure-demo.gif)
 
-Enable **Preserve structure** in Settings → File Filter to keep ancestor headers visible when filtering a page.
+Enable **Preserve structure** in Settings → File Filter — or use the checkbox under the filter input — to keep ancestor headers visible when filtering a page.
 
 Without this setting, only blocks whose text contains the search term are shown. With it enabled, any header that sits above a matching block in the document hierarchy is also shown — even if the header itself does not contain the search term.
 

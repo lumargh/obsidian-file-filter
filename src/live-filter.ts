@@ -32,6 +32,9 @@ export const setFilterQuery = StateEffect.define<string>();
 // Dispatch this to toggle ancestor-header preservation for the active filter.
 export const setPreserveStructure = StateEffect.define<boolean>();
 
+// Dispatch this to toggle the "···" markers for hidden runs.
+export const setShowEllipses = StateEffect.define<boolean>();
+
 // A line that is nothing but an embed, e.g. `![[page]]`.
 const EMBED_LINE = /^\s*!\[\[[^\]]*\]\]\s*$/;
 
@@ -80,6 +83,16 @@ const preserveStructureField = StateField.define<boolean>({
 	},
 });
 
+const showEllipsesField = StateField.define<boolean>({
+	create: () => true,
+	update(value, tr) {
+		for (const e of tr.effects) {
+			if (e.is(setShowEllipses)) return e.value;
+		}
+		return value;
+	},
+});
+
 // Returns 1–6 for lines starting with that many `#`, 0 otherwise.
 function getHeaderLevel(text: string): number {
 	const m = text.match(/^(#{1,6}) /);
@@ -92,6 +105,7 @@ function buildDecorations(state: EditorState): DecorationSet {
 
 	const doc = state.doc;
 	const preserveStructure = state.field(preserveStructureField);
+	const showEllipses = state.field(showEllipsesField);
 
 	// Lines touched by the selection/cursor stay visible regardless of match, so
 	// you can press Enter and edit a new (not-yet-matching) paragraph in place.
@@ -149,7 +163,7 @@ function buildDecorations(state: EditorState): DecorationSet {
 			continue;
 		}
 		if (!inRun) {
-			decos.push(ellipsis.range(doc.line(i).from));
+			if (showEllipses) decos.push(ellipsis.range(doc.line(i).from));
 			inRun = true;
 		}
 		decos.push(hiddenLine.range(doc.line(i).from));
@@ -164,7 +178,7 @@ const decoField = StateField.define<DecorationSet>({
 	create: (state) => buildDecorations(state),
 	update(value, tr) {
 		const filterChanged = tr.effects.some(
-			(e) => e.is(setFilterQuery) || e.is(setPreserveStructure),
+			(e) => e.is(setFilterQuery) || e.is(setPreserveStructure) || e.is(setShowEllipses),
 		);
 		// Recompute on selection moves too, so the cursor's line stays exempt.
 		if (filterChanged || tr.docChanged || tr.selection) return buildDecorations(tr.state);
@@ -305,5 +319,5 @@ class EmbedFilter implements PluginValue {
 
 // Build the editor extension. Needs App for resolving/reading embedded files.
 export function createLiveFilter(app: App): Extension {
-	return [queryField, preserveStructureField, decoField, ViewPlugin.define((view) => new EmbedFilter(view, app))];
+	return [queryField, preserveStructureField, showEllipsesField, decoField, ViewPlugin.define((view) => new EmbedFilter(view, app))];
 }
