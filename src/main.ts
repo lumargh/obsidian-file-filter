@@ -1,13 +1,10 @@
 // todo
-// New feature: 'todo' and 'task' strings also return `- [ ]`
-// New feature: filter out : instead of filtering for a term you want to see, you filter out a term you don't want to see. E.g. filter out 'done' tasks.
 // filter in embeds not working?
-// new feature: add a checkbox under the filter input with title 'preserve structure'. checkbox mirrors the state of 'preserve structure' that's in the settings. toggling the checkbox under the filter input has the same effect: showing/hiding the structure of the matching paragraphs.
 // 1 new feature > filter page: in edit mode, right-click selected text > filter by term
 
 import { MarkdownView, Plugin, View, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
-import { createLiveFilter, setFilterQuery, setPreserveStructure, setShowEllipses } from './live-filter';
+import { createLiveFilter, setExcludeMode, setFilterQuery, setPreserveStructure, setShowEllipses } from './live-filter';
 import { applyBlockFilter, clearBlockFilter } from './dom-filter';
 import { DEFAULT_SETTINGS, FileFilterSettings, FileFilterSettingTab } from './settings';
 
@@ -15,6 +12,7 @@ interface PageFilterState {
 	query: string;
 	filterTimer: number | null;
 	filePath: string;
+	exclude: boolean;
 }
 
 interface PageFilterController {
@@ -403,6 +401,10 @@ export default class FileFilterPlugin extends Plugin {
 		const searchContainer = createEl('div', { cls: 'pf-search-container ff-hidden' });
 
 		const searchRow = searchContainer.createEl('div', { cls: 'pf-search-row' });
+		// Include/exclude mode toggle — leftmost so the current mode reads first.
+		const excludeBtn = searchRow.createEl('button', {
+			cls: 'clickable-icon pf-exclude-toggle',
+		});
 		const searchInput = searchRow.createEl('input', {
 			type: 'text',
 			cls: 'pf-search-input',
@@ -448,7 +450,18 @@ export default class FileFilterPlugin extends Plugin {
 			viewEl.prepend(searchContainer);
 		}
 
-		const state: PageFilterState = { query: '', filterTimer: null, filePath: '' };
+		const state: PageFilterState = { query: '', filterTimer: null, filePath: '', exclude: false };
+
+		const updateExcludeBtn = () => {
+			setIcon(excludeBtn, state.exclude ? 'filter-x' : 'filter');
+			excludeBtn.classList.toggle('is-active', state.exclude);
+			excludeBtn.setAttribute(
+				'aria-label',
+				state.exclude ? 'Hiding matches — click to show matches instead' : 'Showing matches — click to hide matches instead',
+			);
+			searchInput.placeholder = state.exclude ? 'Filter out paragraphs…' : 'Filter paragraphs…';
+		};
+		updateExcludeBtn();
 
 		// Scope to the active reading view. A bare '.markdown-preview-section'
 		// lookup also matches sections rendered inside the hidden source view
@@ -484,7 +497,10 @@ export default class FileFilterPlugin extends Plugin {
 		const applyPreviewFilter = () => {
 			stopObserving();
 			const section = getPreviewSection();
-			if (section) applyBlockFilter(section, state.query, { preserveStructure: this.settings.preserveStructure });
+			if (section) applyBlockFilter(section, state.query, {
+				preserveStructure: this.settings.preserveStructure,
+				exclude: state.exclude,
+			});
 			if (state.query) startObserving();
 		};
 
@@ -502,6 +518,7 @@ export default class FileFilterPlugin extends Plugin {
 					setFilterQuery.of(state.query.trim().toLowerCase()),
 					setPreserveStructure.of(this.settings.preserveStructure),
 					setShowEllipses.of(this.settings.showEllipses),
+					setExcludeMode.of(state.exclude),
 				],
 			});
 		};
@@ -540,9 +557,18 @@ export default class FileFilterPlugin extends Plugin {
 			searchContainer.classList.add('ff-hidden');
 			searchInput.value = '';
 			state.query = '';
+			state.exclude = false; // next open starts in include mode
+			updateExcludeBtn();
 			clearPreviewFilter();
 			clearSourceFilter();
 		};
+
+		excludeBtn.addEventListener('click', () => {
+			state.exclude = !state.exclude;
+			updateExcludeBtn();
+			scheduleCurrentFilter();
+			searchInput.focus();
+		});
 
 		searchBtn.addEventListener('click', () => {
 			// Open in whatever mode is active — no longer forces reading mode.
