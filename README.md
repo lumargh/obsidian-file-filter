@@ -8,9 +8,9 @@ An [Obsidian](https://obsidian.md) plugin with two features: a live filter for t
 
 ![Paragraph filter demo](assets/paragraph-filter-demo.gif)
 
-Click the **filter icon** in the note header (or press the customizable hotkey **Cmd+F**). A search field appears below the header.
+Click the **filter icon** in the note header (or press the customizable hotkey **Cmd+F**) and a filter field appears below the header.
 
-Type anything — non-matching paragraphs are hidden and replaced by a **···** ellipsis. Matching text is highlighted inline.
+Type anything and watch non-matching paragraphs be hidden. Optionally, you can collapse the hidden paragraphs into an **···** ellipsis. Matching text is highlighted inline.
 
 - Click **···** or press **Escape** to clear the filter
 - Press **Cmd/Ctrl+Z** after clicking **···** to restore the previous query
@@ -18,6 +18,8 @@ Type anything — non-matching paragraphs are hidden and replaced by a **···*
 - Click the **filter icon at the left of the search bar** to switch to *exclude* mode — matching paragraphs are hidden instead of shown (e.g. filter out `done` tasks). Click again to switch back; closing the bar resets to include mode.
 
 ### Task keywords
+
+![Task filter demo](assets/tasks-demo.gif)
 
 Three queries also match task syntax, on top of normal text matching:
 
@@ -29,8 +31,6 @@ So typing `todo` shows every open task on the page, and switching to exclude mod
 > **Note:** the filter is designed for editing mode (Live Preview / Source). Filtering in reading mode also works but is known to be buggy.
 
 ### Preserve structure (setting)
-
-![Preserve structure demo](assets/preserve-structure-demo.gif)
 
 Enable **Preserve structure** in Settings → File Filter — or use the checkbox under the filter input — to keep ancestor headers visible when filtering a page.
 
