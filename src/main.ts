@@ -1,7 +1,11 @@
 // todo
+// New feature: 'todo' and 'task' strings also return `- [ ]`
+// New feature: filter out : instead of filtering for a term you want to see, you filter out a term you don't want to see. E.g. filter out 'done' tasks.
+// filter in embeds not working?
+// new feature: add a checkbox under the filter input with title 'preserve structure'. checkbox mirrors the state of 'preserve structure' that's in the settings. toggling the checkbox under the filter input has the same effect: showing/hiding the structure of the matching paragraphs.
 // 1 new feature > filter page: in edit mode, right-click selected text > filter by term
 
-import { MarkdownView, Plugin, WorkspaceLeaf, setIcon } from 'obsidian';
+import { MarkdownView, Plugin, View, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { createLiveFilter, setFilterQuery, setPreserveStructure } from './live-filter';
 import { applyBlockFilter, clearBlockFilter } from './dom-filter';
@@ -10,6 +14,22 @@ import { DEFAULT_SETTINGS, FileFilterSettings, FileFilterSettingTab } from './se
 interface PageFilterState {
 	query: string;
 	filterTimer: number | null;
+	filePath: string;
+}
+
+interface PageFilterController {
+	reapply: () => void; // re-apply after a mode switch
+	destroy: () => void; // remove injected UI, listeners and timers
+}
+
+// Undocumented internals of the core file-explorer view, used to auto-expand
+// collapsed folders that contain matches while a filter is active.
+interface FileExplorerItem {
+	collapsed?: boolean;
+	setCollapsed?: (collapsed: boolean) => unknown;
+}
+interface FileExplorerView extends View {
+	fileItems: Record<string, FileExplorerItem | undefined>;
 }
 
 export default class FileFilterPlugin extends Plugin {
@@ -17,10 +37,9 @@ export default class FileFilterPlugin extends Plugin {
 
 	private filterQuery = '';
 	private filterActive = false;
-	private searchContainerEl: HTMLElement | null = null;
-	private searchInputEl: HTMLInputElement | null = null;
 	private filterTimer: number | null = null;
-	private pageFilters = new Map<HTMLElement, () => void>(); // viewEl → re-apply after a mode switch
+	private autoExpandedFolders = new Set<string>();
+	private pageFilters = new Map<HTMLElement, PageFilterController>();
 
 	async loadSettings() {
 		const data = (await this.loadData()) as Partial<FileFilterSettings> | null;
@@ -51,6 +70,11 @@ export default class FileFilterPlugin extends Plugin {
 		}));
 		this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
 			this.initPageFilters();
+			this.reapplyPageFilters();
+		}));
+		// A leaf can be reused for a different file without a layout change;
+		// reapply() notices the file swap and drops the stale filter.
+		this.registerEvent(this.app.workspace.on('file-open', () => {
 			this.reapplyPageFilters();
 		}));
 
@@ -88,21 +112,37 @@ export default class FileFilterPlugin extends Plugin {
 	}
 
 	onunload() {
-		const container = this.getExplorerContainer();
-		if (container) this.clearFilter(container);
-		container?.querySelector('.ff-search-btn')?.remove();
-		this.searchContainerEl?.remove();
+		if (this.filterTimer !== null) window.clearTimeout(this.filterTimer);
 
-		// Clean up all injected page filter elements
-		activeDocument.querySelectorAll('.pf-search-btn, .pf-search-container, .pf-ellipsis').forEach(el => el.remove());
-		activeDocument.querySelectorAll('.pf-filtering').forEach(el => el.classList.remove('pf-filtering'));
-		activeDocument.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
+		const container = this.getExplorerContainer();
+		if (container) {
+			this.clearFilter(container);
+			container.querySelector('.ff-search-btn')?.remove();
+			container.querySelector('.ff-search-container')?.remove();
+		}
+
+		// Each controller removes its own injected UI, filter state, listeners
+		// and timers — including views living in popout windows.
+		this.pageFilters.forEach(({ destroy }) => destroy());
 		this.pageFilters.clear(); // CM6 decorations are removed by the editor-extension teardown
 	}
 
+	private getExplorerLeaf(): WorkspaceLeaf | null {
+		return this.app.workspace.getLeavesOfType('file-explorer')[0] ?? null;
+	}
+
 	private getExplorerContainer(): HTMLElement | null {
-		const leaf = this.app.workspace.getLeavesOfType('file-explorer')[0];
-		return leaf?.view?.containerEl ?? null;
+		return this.getExplorerLeaf()?.view?.containerEl ?? null;
+	}
+
+	// Resolve the injected elements from the current container each time — the
+	// explorer pane can be closed and recreated, so element references held
+	// across calls would go stale.
+	private getSearchEls(container: HTMLElement) {
+		return {
+			searchContainer: container.querySelector<HTMLElement>('.ff-search-container'),
+			searchInput: container.querySelector<HTMLInputElement>('.ff-search-input'),
+		};
 	}
 
 	private initExplorer() {
@@ -143,20 +183,18 @@ export default class FileFilterPlugin extends Plugin {
 			container.prepend(searchContainer);
 		}
 
-		this.searchContainerEl = searchContainer;
-		this.searchInputEl = searchInput;
-
 		searchBtn.addEventListener('click', () => this.toggleSearch(container));
 		clearBtn.addEventListener('click', () => this.deactivateSearch(container));
 		searchInput.addEventListener('input', () => {
 			this.filterQuery = searchInput.value;
-			this.scheduleFilter(container);
+			this.scheduleFilter();
 		});
 		searchInput.addEventListener('keydown', (e: KeyboardEvent) => {
 			if (e.key === 'Escape') this.deactivateSearch(container);
 		});
 
-		// Restore state if plugin was reloaded while filter was active
+		// Restore state if the explorer pane (or the plugin) was recreated
+		// while a filter was active
 		if (this.filterQuery) {
 			searchContainer.classList.remove('ff-hidden');
 			searchInput.value = this.filterQuery;
@@ -165,8 +203,9 @@ export default class FileFilterPlugin extends Plugin {
 	}
 
 	private toggleSearch(container: HTMLElement) {
-		if (!this.searchContainerEl) return;
-		if (this.searchContainerEl.classList.contains('ff-hidden')) {
+		const { searchContainer } = this.getSearchEls(container);
+		if (!searchContainer) return;
+		if (searchContainer.classList.contains('ff-hidden')) {
 			this.openSearch();
 		} else {
 			this.deactivateSearch(container);
@@ -174,26 +213,31 @@ export default class FileFilterPlugin extends Plugin {
 	}
 
 	private openSearch() {
-		if (!this.searchContainerEl || !this.searchInputEl) return;
-		this.searchContainerEl.classList.remove('ff-hidden');
-		this.searchInputEl.focus();
-		this.searchInputEl.select();
+		const container = this.getExplorerContainer();
+		if (!container) return;
+		const { searchContainer, searchInput } = this.getSearchEls(container);
+		if (!searchContainer || !searchInput) return;
+		searchContainer.classList.remove('ff-hidden');
+		searchInput.focus();
+		searchInput.select();
 	}
 
 	private deactivateSearch(container: HTMLElement) {
-		if (!this.searchContainerEl || !this.searchInputEl) return;
-		this.searchContainerEl.classList.add('ff-hidden');
-		this.searchInputEl.value = '';
+		const { searchContainer, searchInput } = this.getSearchEls(container);
+		if (!searchContainer || !searchInput) return;
+		searchContainer.classList.add('ff-hidden');
+		searchInput.value = '';
 		this.filterQuery = '';
 		this.clearFilter(container);
 	}
 
-	private scheduleFilter(container?: HTMLElement) {
+	private scheduleFilter() {
 		if (this.filterTimer !== null) window.clearTimeout(this.filterTimer);
 		this.filterTimer = window.setTimeout(() => {
-			const el = container ?? this.getExplorerContainer();
-			if (el) this.applyFilter(el);
 			this.filterTimer = null;
+			// Resolve at fire time — the pane may have been recreated meanwhile
+			const el = this.getExplorerContainer();
+			if (el) this.applyFilter(el);
 		}, 50);
 	}
 
@@ -221,6 +265,11 @@ export default class FileFilterPlugin extends Plugin {
 			}
 		}
 
+		// Matches inside collapsed folders have no DOM nodes until the folder
+		// expands; if anything was expanded, run again so the new nodes get
+		// classified (the second pass expands nothing, so this terminates).
+		if (this.expandFolders(neededFolderPaths)) this.scheduleFilter();
+
 		container.classList.add('ff-filtering');
 
 		container.querySelectorAll<HTMLElement>('.nav-file').forEach(el => {
@@ -244,7 +293,36 @@ export default class FileFilterPlugin extends Plugin {
 		this.removeSidebarEllipses(container);
 		container.classList.remove('ff-filtering');
 		container.querySelectorAll('.ff-no-match').forEach(el => el.classList.remove('ff-no-match'));
+		this.restoreCollapsedFolders();
 		this.filterActive = false;
+	}
+
+	// Expand collapsed folders that contain matches, remembering which ones we
+	// touched so clearFilter() can restore them. A folder the user re-collapses
+	// while filtering stays collapsed (it remains in the set, so it isn't
+	// re-expanded). Returns true if anything was expanded.
+	private expandFolders(paths: Set<string>): boolean {
+		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems;
+		if (!items) return false;
+		let expanded = false;
+		for (const path of paths) {
+			const item = items[path];
+			if (!item?.collapsed || this.autoExpandedFolders.has(path)) continue;
+			item.setCollapsed?.(false);
+			this.autoExpandedFolders.add(path);
+			expanded = true;
+		}
+		return expanded;
+	}
+
+	private restoreCollapsedFolders() {
+		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems;
+		if (items) {
+			for (const path of this.autoExpandedFolders) {
+				items[path]?.setCollapsed?.(true);
+			}
+		}
+		this.autoExpandedFolders.clear();
 	}
 
 	private insertSidebarEllipses(container: HTMLElement) {
@@ -280,12 +358,13 @@ export default class FileFilterPlugin extends Plugin {
 	// Re-apply any open filter in its current mode (e.g. after a reading ⇄ Live
 	// Preview switch) and prune controllers for closed views.
 	private reapplyPageFilters() {
-		this.pageFilters.forEach((reapply, viewEl) => {
+		this.pageFilters.forEach((controller, viewEl) => {
 			if (!viewEl.isConnected) {
+				controller.destroy(); // cancel pending timers; element ops are no-ops
 				this.pageFilters.delete(viewEl);
 				return;
 			}
-			reapply();
+			controller.reapply();
 		});
 	}
 
@@ -325,7 +404,7 @@ export default class FileFilterPlugin extends Plugin {
 			viewEl.prepend(searchContainer);
 		}
 
-		const state: PageFilterState = { query: '', filterTimer: null };
+		const state: PageFilterState = { query: '', filterTimer: null, filePath: '' };
 
 		// Scope to the active reading view. A bare '.markdown-preview-section'
 		// lookup also matches sections rendered inside the hidden source view
@@ -338,14 +417,31 @@ export default class FileFilterPlugin extends Plugin {
 
 		// ── Reading mode (DOM-based) ──────────────────────────────────────────
 		// Block-level filtering lives in dom-filter.ts (shared with embeds).
+		// Reading mode re-renders blocks on edits and renders them lazily on
+		// scroll, which wipes the applied filter classes — so while a filter is
+		// active in preview mode, watch the reading view and re-apply after
+		// external mutations. The observer is paused around our own DOM writes
+		// to keep them from re-triggering it.
+		const observer = new MutationObserver(() => {
+			if (state.query) scheduleCurrentFilter();
+		});
+		const stopObserving = () => observer.disconnect();
+		const startObserving = () => {
+			const target = viewEl.querySelector('.markdown-reading-view');
+			if (target) observer.observe(target, { childList: true, subtree: true });
+		};
+
 		const clearPreviewFilter = () => {
+			stopObserving();
 			const section = getPreviewSection();
 			if (section) clearBlockFilter(section);
 		};
 
 		const applyPreviewFilter = () => {
+			stopObserving();
 			const section = getPreviewSection();
 			if (section) applyBlockFilter(section, state.query, { preserveStructure: this.settings.preserveStructure });
+			if (state.query) startObserving();
 		};
 
 		// ── Live Preview / Source mode (CM6 decorations) ──────────────────────
@@ -378,6 +474,7 @@ export default class FileFilterPlugin extends Plugin {
 			if ((leaf.view as MarkdownView).getMode() === 'preview') {
 				applyPreviewFilter();
 			} else {
+				stopObserving(); // the hidden preview DOM doesn't need watching
 				applySourceFilter();
 			}
 		};
@@ -391,6 +488,10 @@ export default class FileFilterPlugin extends Plugin {
 		};
 
 		const deactivate = () => {
+			if (state.filterTimer !== null) {
+				window.clearTimeout(state.filterTimer);
+				state.filterTimer = null;
+			}
 			searchContainer.classList.add('ff-hidden');
 			searchInput.value = '';
 			state.query = '';
@@ -398,14 +499,10 @@ export default class FileFilterPlugin extends Plugin {
 			clearSourceFilter();
 		};
 
-		// Re-apply the active query after a mode switch (reading ⇄ Live Preview).
-		this.pageFilters.set(viewEl, () => {
-			if (!searchContainer.classList.contains('ff-hidden') && state.query) scheduleCurrentFilter();
-		});
-
 		searchBtn.addEventListener('click', () => {
 			// Open in whatever mode is active — no longer forces reading mode.
 			if (searchContainer.classList.contains('ff-hidden')) {
+				state.filePath = (leaf.view as MarkdownView).file?.path ?? '';
 				searchContainer.classList.remove('ff-hidden');
 				searchInput.focus();
 				searchInput.select();
@@ -439,7 +536,9 @@ export default class FileFilterPlugin extends Plugin {
 
 		// Click an ellipsis → clear the query; Ctrl/Cmd+Z restores it.
 		// Handles both the reading-mode ellipsis and the CM6 block-widget one.
-		this.registerDomEvent(viewEl, 'click', (e: MouseEvent) => {
+		// A plain listener (not registerDomEvent) so destroy() can remove it when
+		// the view closes, instead of accumulating registrations until unload.
+		const onViewClick = (e: MouseEvent) => {
 			const target = e.target as HTMLElement;
 			if (!target.classList.contains('pf-ellipsis') && !target.classList.contains('cm-pf-ellipsis')) return;
 			e.preventDefault();
@@ -449,6 +548,28 @@ export default class FileFilterPlugin extends Plugin {
 			state.query = '';
 			scheduleCurrentFilter();
 			searchInput.focus();
+		};
+		viewEl.addEventListener('click', onViewClick);
+
+		const destroy = () => {
+			deactivate();
+			viewEl.removeEventListener('click', onViewClick);
+			searchBtn.remove();
+			searchContainer.remove();
+		};
+
+		this.pageFilters.set(viewEl, {
+			reapply: () => {
+				if (searchContainer.classList.contains('ff-hidden')) return;
+				// The same leaf can be reused for a different file — drop the
+				// filter rather than carry a stale query across files.
+				if (((leaf.view as MarkdownView).file?.path ?? '') !== state.filePath) {
+					deactivate();
+					return;
+				}
+				if (state.query) scheduleCurrentFilter();
+			},
+			destroy,
 		});
 	}
 
