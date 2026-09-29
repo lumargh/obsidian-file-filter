@@ -22,7 +22,13 @@ You can also use the filter in reverse: hide every paragraph that *contains* a w
 
 Click the **filter icon at the left of the search bar** to switch to exclude mode — the icon gains an accent and the placeholder changes to *Filter out paragraphs…*. Type a word and matching paragraphs disappear instead of being shown.
 
+Shortcut: type **`-`** as the first character (e.g. `-apple`) to switch to exclude mode — the `-` is consumed, not searched for. Press **Backspace** with the cursor at the start of the field to switch back.
+
 Click the icon again to switch back. Closing the filter bar resets to normal (include) mode.
+
+### Tables
+
+Tables are filtered by row: a table with a match shows its header plus only the matching rows (highlighted), and tables with no match are hidden. If the header itself matches, the whole table is shown. In exclude mode, matching rows are hidden instead.
 
 ### Task keywords
 

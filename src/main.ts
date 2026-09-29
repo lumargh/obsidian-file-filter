@@ -1,8 +1,7 @@
 // todo
-// filter in embeds not working?
 // 1 new feature > filter page: in edit mode, right-click selected text > filter by term
 
-import { MarkdownView, Plugin, View, WorkspaceLeaf, setIcon } from 'obsidian';
+import { MarkdownView, Plugin, TFolder, View, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { createLiveFilter, setExcludeMode, setFilterQuery, setPreserveStructure, setShowEllipses } from './live-filter';
 import { applyBlockFilter, clearBlockFilter } from './dom-filter';
@@ -264,26 +263,49 @@ export default class FileFilterPlugin extends Plugin {
 			return;
 		}
 
-		// Files whose full path contains the query
+		// Folders whose path contains the query are matched in their own right;
+		// a matched folder and everything inside it (files and subfolders, even
+		// empty ones) is shown. The root folder (path '') is never a match.
+		const allFolders = this.app.vault.getAllLoadedFiles()
+			.filter((f): f is TFolder => f instanceof TFolder);
+		const matchedFolderPaths = allFolders
+			.filter(f => f.path !== '' && f.path.toLowerCase().includes(q))
+			.map(f => f.path);
+		const isUnderMatched = (p: string): boolean =>
+			matchedFolderPaths.some(m => p === m || p.startsWith(m + '/'));
+
+		// Files whose full path contains the query, or that live under a matched folder
 		const matchingFilePaths = new Set(
 			this.app.vault.getFiles()
-				.filter(f => f.path.toLowerCase().includes(q))
+				.filter(f => f.path.toLowerCase().includes(q) || isUnderMatched(f.path))
 				.map(f => f.path),
 		);
 
-		// All ancestor folder paths needed to show directory structure
-		const neededFolderPaths = new Set<string>();
+		// Folders to display: ancestors needed to show matching files, every
+		// matched folder (plus its ancestors, so it's reachable), and every
+		// descendant folder of a matched folder.
+		const foldersToShow = new Set<string>();
+		const addWithAncestors = (path: string): void => {
+			const parts = path.split('/');
+			for (let i = 1; i <= parts.length; i++) {
+				foldersToShow.add(parts.slice(0, i).join('/'));
+			}
+		};
 		for (const filePath of matchingFilePaths) {
 			const parts = filePath.split('/');
 			for (let i = 1; i < parts.length; i++) {
-				neededFolderPaths.add(parts.slice(0, i).join('/'));
+				foldersToShow.add(parts.slice(0, i).join('/'));
 			}
+		}
+		for (const m of matchedFolderPaths) addWithAncestors(m);
+		for (const f of allFolders) {
+			if (f.path !== '' && isUnderMatched(f.path)) foldersToShow.add(f.path);
 		}
 
 		// Matches inside collapsed folders have no DOM nodes until the folder
 		// expands; if anything was expanded, run again so the new nodes get
 		// classified (the second pass expands nothing, so this terminates).
-		if (this.expandFolders(neededFolderPaths)) this.scheduleFilter();
+		if (this.expandFolders(foldersToShow)) this.scheduleFilter();
 
 		container.classList.add('ff-filtering');
 
@@ -296,7 +318,7 @@ export default class FileFilterPlugin extends Plugin {
 			// :scope > ensures we get the direct title child, not a nested folder's title
 			const path = el.querySelector(':scope > .nav-folder-title')?.getAttribute('data-path') ?? '';
 			const isRoot = el.classList.contains('mod-root') || path === '';
-			const show = isRoot || neededFolderPaths.has(path);
+			const show = isRoot || foldersToShow.has(path);
 			el.classList.toggle('ff-no-match', !show);
 		});
 
@@ -588,12 +610,26 @@ export default class FileFilterPlugin extends Plugin {
 
 		searchInput.addEventListener('input', () => {
 			previousQuery = ''; // user typed manually — forget ellipsis-click undo state
+			// A leading '-' is consumed and flips include/exclude mode.
+			if (searchInput.value.startsWith('-')) {
+				searchInput.value = searchInput.value.slice(1);
+				state.exclude = !state.exclude;
+				updateExcludeBtn();
+			}
 			state.query = searchInput.value;
 			scheduleCurrentFilter();
 		});
 
 		searchInput.addEventListener('keydown', (e: KeyboardEvent) => {
 			if (e.key === 'Escape') { deactivate(); return; }
+			// Backspace at the start deletes the consumed '-': back to include mode.
+			if (e.key === 'Backspace' && state.exclude && searchInput.selectionStart === 0 && searchInput.selectionEnd === 0) {
+				e.preventDefault();
+				state.exclude = false;
+				updateExcludeBtn();
+				scheduleCurrentFilter();
+				return;
+			}
 			// Restore query after an ellipsis-click clear (only when input is empty)
 			if ((e.metaKey || e.ctrlKey) && e.key === 'z' && previousQuery && searchInput.value === '') {
 				e.preventDefault();

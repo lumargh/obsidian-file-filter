@@ -13,18 +13,20 @@
 // they're handled separately by a ViewPlugin (EmbedFilter) that reuses the
 // reading-mode block filter on each embed's rendered content.
 
-import { App, EventRef, MarkdownView, TFile } from 'obsidian';
-import { EditorState, Extension, StateEffect, StateField } from '@codemirror/state';
+import { App, EventRef, MarkdownView, TFile, editorLivePreviewField } from 'obsidian';
+import { EditorState, Extension, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import {
 	Decoration,
 	DecorationSet,
 	EditorView,
+	GutterMarker,
+	gutterLineClass,
 	PluginValue,
 	ViewPlugin,
 	ViewUpdate,
 	WidgetType,
 } from '@codemirror/view';
-import { applyBlockFilter, clearBlockFilter } from './dom-filter';
+import { applyBlockFilter, clearBlockFilter, clearTableFilter, filterTable } from './dom-filter';
 import { taskContentMatches, taskKind, taskLineMatches } from './matcher';
 
 // Dispatch this to a CM editor to set the active filter query ('' = no filter).
@@ -41,6 +43,9 @@ export const setExcludeMode = StateEffect.define<boolean>();
 
 // A line that is nothing but an embed, e.g. `![[page]]`.
 const EMBED_LINE = /^\s*!\[\[[^\]]*\]\]\s*$/;
+
+// A markdown table's header separator row, e.g. `| --- | :-: |`.
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 
 class EllipsisWidget extends WidgetType {
 	// All ellipses are identical, so they never need re-rendering.
@@ -65,6 +70,13 @@ class EllipsisWidget extends WidgetType {
 const hiddenLine = Decoration.line({ class: 'cm-pf-no-match' });
 const ellipsis = Decoration.widget({ widget: new EllipsisWidget(), block: true, side: -1 });
 const highlightMark = Decoration.mark({ class: 'cm-pf-highlight' });
+
+// Hidden lines collapse to zero height, so their gutter entries (line numbers,
+// fold markers) would stack on top of each other; this class hides them.
+class HiddenGutterMarker extends GutterMarker {
+	elementClass = 'cm-pf-no-match-gutter';
+}
+const hiddenGutter = new HiddenGutterMarker();
 
 // Holds the active query for a given editor.
 const queryField = StateField.define<string>({
@@ -149,6 +161,22 @@ function buildDecorations(state: EditorState): DecorationSet {
 		lineVisible[i] = cursorLines.has(i) || isEmbed || keep;
 	}
 
+	// Tables: if any row is visible, keep the header and separator too. In Live
+	// Preview the table renders as one widget over all its lines, so keep them
+	// all and let TableFilter hide rows in the widget's DOM.
+	const livePreview = state.field(editorLivePreviewField, false) ?? false;
+	for (let i = 2; i <= doc.lines; i++) {
+		if (!TABLE_SEP.test(doc.line(i).text) || !doc.line(i - 1).text.includes('|')) continue;
+		let end = i;
+		while (end < doc.lines && doc.line(end + 1).text.includes('|')) end++;
+		let anyVisible = false;
+		for (let n = i + 1; n <= end; n++) if (lineVisible[n]) anyVisible = true;
+		if (!anyVisible && !(livePreview && lineVisible[i - 1])) continue;
+		lineVisible[i - 1] = lineVisible[i] = true;
+		if (livePreview) for (let n = i + 1; n <= end; n++) lineVisible[n] = true;
+		i = end;
+	}
+
 	// Pass 2 (optional): for each visible line, un-hide its ancestor headers.
 	if (preserveStructure) {
 		const stack: Array<{ level: number; lineNum: number }> = [];
@@ -201,10 +229,20 @@ const decoField = StateField.define<DecorationSet>({
 			(e) => e.is(setFilterQuery) || e.is(setPreserveStructure) || e.is(setShowEllipses) || e.is(setExcludeMode),
 		);
 		// Recompute on selection moves too, so the cursor's line stays exempt.
-		if (filterChanged || tr.docChanged || tr.selection) return buildDecorations(tr.state);
+		const modeChanged = tr.startState.field(editorLivePreviewField, false) !== tr.state.field(editorLivePreviewField, false);
+		if (filterChanged || modeChanged || tr.docChanged || tr.selection) return buildDecorations(tr.state);
 		return value.map(tr.changes);
 	},
-	provide: (f) => EditorView.decorations.from(f),
+	provide: (f) => [
+		EditorView.decorations.from(f),
+		gutterLineClass.compute([f], (state) => {
+			const b = new RangeSetBuilder<GutterMarker>();
+			state.field(f).between(0, state.doc.length, (from, _to, deco) => {
+				if (deco === hiddenLine) b.add(from, from, hiddenGutter);
+			});
+			return b.finish();
+		}),
+	],
 });
 
 // Filters the rendered content of embedded files (![[page]]). Embeds render as
@@ -353,7 +391,85 @@ class EmbedFilter implements PluginValue {
 	}
 }
 
+// Filters the rows of Live Preview table widgets, which render outside the
+// line flow like embeds. A table with no kept row is hidden entirely.
+class TableFilter implements PluginValue {
+	private rafId = 0;
+	private ranges: Range[] = [];
+	private readonly win: Window;
+
+	constructor(private view: EditorView) {
+		this.win = view.dom.ownerDocument.defaultView ?? window;
+		this.scheduleApply();
+	}
+
+	update(update: ViewUpdate): void {
+		const filterChanged = update.transactions.some((tr) =>
+			tr.effects.some((e) => e.is(setFilterQuery) || e.is(setExcludeMode)),
+		);
+		if (filterChanged || update.docChanged || update.viewportChanged || update.geometryChanged) {
+			this.scheduleApply();
+		}
+	}
+
+	destroy(): void {
+		if (this.rafId) this.win.cancelAnimationFrame(this.rafId);
+		this.apply('');
+	}
+
+	private scheduleApply(): void {
+		if (this.rafId) return;
+		this.rafId = this.win.requestAnimationFrame(() => {
+			this.rafId = 0;
+			this.apply(this.view.state.field(queryField).trim().toLowerCase());
+		});
+	}
+
+	private apply(q: string): void {
+		const exclude = this.view.state.field(excludeField);
+		const highlight = this.highlight();
+		for (const r of this.ranges) highlight.delete(r);
+		this.ranges = [];
+		this.view.contentDOM.querySelectorAll<HTMLElement>('.cm-table-widget').forEach((widget) => {
+			const table = widget.querySelector<HTMLElement>('table');
+			if (!table) return;
+			clearTableFilter(table);
+			// Highlight via ranges, not spans: cells host nested editors whose
+			// text nodes we leave alone.
+			const kept = !q || filterTable(table, q, exclude, false);
+			widget.classList.toggle('pf-embed-hidden', !kept);
+			if (q && kept && !exclude) this.highlightTable(table, q, highlight);
+		});
+	}
+
+	// The CSS Custom Highlight registry is per window; views share one entry.
+	private highlight(): Highlight {
+		const w = this.win as typeof window;
+		let h = w.CSS.highlights.get('pf-match');
+		if (!h) {
+			h = new w.Highlight();
+			w.CSS.highlights.set('pf-match', h);
+		}
+		return h;
+	}
+
+	private highlightTable(table: HTMLElement, q: string, h: Highlight): void {
+		const walker = table.ownerDocument.createTreeWalker(table, NodeFilter.SHOW_TEXT);
+		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+			if (node.parentElement?.closest('tr.pf-no-match')) continue;
+			const lower = (node.textContent ?? '').toLowerCase();
+			for (let i = lower.indexOf(q); i !== -1; i = lower.indexOf(q, i + q.length)) {
+				const range = table.ownerDocument.createRange();
+				range.setStart(node, i);
+				range.setEnd(node, i + q.length);
+				h.add(range);
+				this.ranges.push(range);
+			}
+		}
+	}
+}
+
 // Build the editor extension. Needs App for resolving/reading embedded files.
 export function createLiveFilter(app: App): Extension {
-	return [queryField, preserveStructureField, showEllipsesField, excludeField, decoField, ViewPlugin.define((view) => new EmbedFilter(view, app))];
+	return [queryField, preserveStructureField, showEllipsesField, excludeField, decoField, ViewPlugin.define((view) => new EmbedFilter(view, app)), ViewPlugin.define((view) => new TableFilter(view))];
 }
