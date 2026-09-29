@@ -50,6 +50,10 @@
 /* Page paragraph filter */
 
 .pf-search-container {
+	/* Stack above themes' full-pane ::before overlays (e.g. background images),
+	   which otherwise swallow clicks, like Obsidian's own .view-header. */
+	position: relative;
+	z-index: 1;
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
@@ -163,6 +167,12 @@
 	display: none !important;
 }
 
+/* Gutter entries of hidden lines: visibility (not display) keeps CodeMirror's
+   gutter spacing intact. */
+.cm-gutterElement.cm-pf-no-match-gutter {
+	visibility: hidden;
+}
+
 /* A whole embed whose file contains no match collapses away. */
 .pf-embed-hidden {
 	display: none !important;
@@ -201,6 +211,11 @@
 	background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.15);
 	box-shadow: inset 0 0 0 1px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);
 	border-radius: 2px;
+}
+
+/* Live Preview table matches (CSS Custom Highlight API; only colors apply). */
+::highlight(pf-match) {
+	background-color: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.3);
 }
 
 .pf-highlight {

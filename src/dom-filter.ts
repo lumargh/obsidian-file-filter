@@ -272,6 +272,30 @@ function filterList(list: HTMLElement, q: string, exclude: boolean): boolean {
 	return anyKept;
 }
 
+// Filter a table per body row; the header row always stays. A header match
+// (include mode) keeps every row. Returns true if any body row is kept.
+export function filterTable(table: HTMLElement, q: string, exclude: boolean, highlight = true): boolean {
+	table.classList.add('pf-filtering');
+	const headerMatch = !exclude && (table.querySelector('thead')?.textContent?.toLowerCase() ?? '').includes(q);
+	let anyKept = headerMatch;
+	table.querySelectorAll<HTMLElement>('tbody > tr').forEach(tr => {
+		const matches = (tr.textContent?.toLowerCase() ?? '').includes(q);
+		const keep = headerMatch || (exclude ? !matches : matches);
+		tr.classList.toggle('pf-no-match', !keep);
+		if (keep) anyKept = true;
+		if (keep && !exclude && highlight) highlightTextNodes(tr, q);
+	});
+	if (headerMatch && highlight) highlightTextNodes(table.querySelector('thead')!, q);
+	return anyKept;
+}
+
+// Undo filterTable.
+export function clearTableFilter(table: HTMLElement): void {
+	clearHighlights(table);
+	table.classList.remove('pf-filtering');
+	table.querySelectorAll('.pf-no-match').forEach(el => el.classList.remove('pf-no-match'));
+}
+
 // Remove all filter artifacts from a section.
 export function clearBlockFilter(section: HTMLElement): void {
 	clearHighlights(section);
@@ -329,6 +353,9 @@ export function applyBlockFilter(
 			// List blocks filter per-item to match Live Preview's line granularity.
 			const list = el.querySelector<HTMLElement>('ul, ol');
 			const anyKept = list ? filterList(list, q, opts.exclude ?? false) : false;
+			el.classList.toggle('pf-no-match', !anyKept);
+		} else if (el.querySelector('table')) {
+			const anyKept = filterTable(el.querySelector('table')!, q, opts.exclude ?? false);
 			el.classList.toggle('pf-no-match', !anyKept);
 		} else {
 			const text = el.textContent?.toLowerCase() ?? '';
