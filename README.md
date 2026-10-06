@@ -89,6 +89,13 @@ Press **Escape** or click **×** to clear the filter and return to the normal vi
 - Collapsed folders that contain matches are automatically expanded while the filter is active, then restored when cleared
 - All file types are included, not just Markdown notes
 
+### Folder view
+
+Click a folder's **name** to open it: the Files pane narrows to just that folder's contents, like double-clicking a folder in Finder's list view. Click the **chevron** to expand or collapse a folder in place as usual.
+
+- Click **←** above the filter bar to go up to the parent folder; from a top-level folder it returns to the whole vault
+- While a folder is open, the filter only searches inside it, matching paths relative to the folder
+
 ---
 
 ## Other Plugins

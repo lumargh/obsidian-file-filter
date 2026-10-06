@@ -36,6 +36,10 @@ export default class FileFilterPlugin extends Plugin {
 	private filterActive = false;
 	private filterTimer: number | null = null;
 	private autoExpandedFolders = new Set<string>();
+	// Folder view: the folder the explorer is narrowed to (null = whole vault),
+	// and folders we expanded to show it, collapsed again on exit.
+	private scopePath: string | null = null;
+	private scopeExpandedFolders = new Set<string>();
 	private pageFilters = new Map<HTMLElement, PageFilterController>();
 
 	async loadSettings() {
@@ -120,8 +124,22 @@ export default class FileFilterPlugin extends Plugin {
 
 		// Re-apply filter when vault contents change while a filter is active
 		this.registerEvent(this.app.vault.on('create', () => { if (this.filterActive) this.scheduleFilter(); }));
-		this.registerEvent(this.app.vault.on('delete', () => { if (this.filterActive) this.scheduleFilter(); }));
-		this.registerEvent(this.app.vault.on('rename', () => { if (this.filterActive) this.scheduleFilter(); }));
+		this.registerEvent(this.app.vault.on('delete', file => {
+			// Leave the folder view if the open folder (or an ancestor) went away
+			const scope = this.scopePath;
+			if (scope !== null && (scope === file.path || scope.startsWith(file.path + '/'))) this.setScope(null);
+			if (this.filterActive) this.scheduleFilter();
+		}));
+		this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+			// Follow the open folder when it (or an ancestor) is renamed or moved
+			const scope = this.scopePath;
+			if (scope !== null && (scope === oldPath || scope.startsWith(oldPath + '/'))) {
+				this.scopePath = file.path + scope.slice(oldPath.length);
+				const container = this.getExplorerContainer();
+				if (container) this.applyScope(container);
+			}
+			if (this.filterActive) this.scheduleFilter();
+		}));
 	}
 
 	onunload() {
@@ -130,7 +148,9 @@ export default class FileFilterPlugin extends Plugin {
 
 		const container = this.getExplorerContainer();
 		if (container) {
+			this.setScope(null);
 			this.clearFilter(container);
+			container.querySelector('.ff-scope-header')?.remove();
 			container.querySelector('.ff-search-btn')?.remove();
 			container.querySelector('.ff-search-container')?.remove();
 		}
@@ -197,6 +217,37 @@ export default class FileFilterPlugin extends Plugin {
 			container.prepend(searchContainer);
 		}
 
+		// Folder view header — back arrow plus the open folder's name
+		const scopeHeader = createEl('div', { cls: 'ff-scope-header ff-hidden' });
+		const backBtn = scopeHeader.createEl('button', {
+			cls: 'clickable-icon ff-scope-back',
+			attr: { 'aria-label': 'Back' },
+		});
+		setIcon(backBtn, 'arrow-left');
+		scopeHeader.createEl('span', { cls: 'ff-scope-label' });
+		searchContainer.before(scopeHeader);
+
+		backBtn.addEventListener('click', () => {
+			const path = this.scopePath;
+			if (path === null) return;
+			const slash = path.lastIndexOf('/');
+			this.setScope(slash === -1 ? null : path.slice(0, slash));
+		});
+
+		// Clicking a folder's name opens it in the folder view; the chevron
+		// still expands/collapses in place. Capture phase so Obsidian's own
+		// toggle handler never sees the click.
+		this.registerDomEvent(container, 'click', (e: MouseEvent) => {
+			const target = e.target as HTMLElement;
+			const title = target.closest<HTMLElement>('.nav-folder-title');
+			if (!title || target.closest('.collapse-icon') || title.parentElement?.classList.contains('mod-root')) return;
+			const path = title.getAttribute('data-path');
+			if (!path) return;
+			e.preventDefault();
+			e.stopPropagation();
+			this.setScope(path);
+		}, { capture: true });
+
 		searchBtn.addEventListener('click', () => this.toggleSearch(container));
 		clearBtn.addEventListener('click', () => this.deactivateSearch(container));
 		searchInput.addEventListener('input', () => {
@@ -207,12 +258,59 @@ export default class FileFilterPlugin extends Plugin {
 			if (e.key === 'Escape') this.deactivateSearch(container);
 		});
 
+		this.applyScope(container);
+
 		// Restore state if the explorer pane (or the plugin) was recreated
 		// while a filter was active
 		if (this.filterQuery) {
 			searchContainer.classList.remove('ff-hidden');
 			searchInput.value = this.filterQuery;
 			this.applyFilter(container);
+		}
+	}
+
+	// Narrow the explorer to one folder (null shows the whole vault again).
+	private setScope(path: string | null) {
+		this.scopePath = path;
+		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems;
+		if (items) {
+			if (path === null) {
+				for (const p of this.scopeExpandedFolders) items[p]?.setCollapsed?.(true);
+				this.scopeExpandedFolders.clear();
+			} else {
+				// The open folder and its ancestors must be expanded to render it
+				const parts = path.split('/');
+				for (let i = 1; i <= parts.length; i++) {
+					const p = parts.slice(0, i).join('/');
+					if (!items[p]?.collapsed) continue;
+					items[p]?.setCollapsed?.(false);
+					this.scopeExpandedFolders.add(p);
+				}
+			}
+		}
+		const container = this.getExplorerContainer();
+		if (!container) return;
+		this.applyScope(container);
+		if (path !== null) this.getSearchEls(container).searchContainer?.classList.remove('ff-hidden');
+		if (this.filterActive) this.scheduleFilter();
+	}
+
+	// Mark the open folder and its ancestors; CSS hides their titles, their
+	// other children and their indent, so the folder's contents read as the root.
+	private applyScope(container: HTMLElement) {
+		container.querySelectorAll('.ff-scope-chain').forEach(el => el.classList.remove('ff-scope-chain', 'ff-scope-root'));
+		const path = this.scopePath;
+		container.classList.toggle('ff-scoped', path !== null);
+		container.querySelector('.ff-scope-header')?.classList.toggle('ff-hidden', path === null);
+		if (path === null) return;
+
+		container.querySelector('.ff-scope-label')?.setText(path.split('/').pop() ?? path);
+		const parts = path.split('/');
+		for (let i = 1; i <= parts.length; i++) {
+			const p = parts.slice(0, i).join('/');
+			const folder = container.querySelector(`.nav-folder-title[data-path="${CSS.escape(p)}"]`)?.parentElement;
+			folder?.classList.add('ff-scope-chain');
+			if (i === parts.length) folder?.classList.add('ff-scope-root');
 		}
 	}
 
@@ -263,13 +361,19 @@ export default class FileFilterPlugin extends Plugin {
 			return;
 		}
 
+		// In folder view, only the open folder's contents are searched, by
+		// their path relative to it.
+		const scope = this.scopePath;
+		const inScope = (p: string): boolean => scope === null || p.startsWith(scope + '/');
+		const rel = (p: string): string => (scope === null ? p : p.slice(scope.length + 1)).toLowerCase();
+
 		// Folders whose path contains the query are matched in their own right;
 		// a matched folder and everything inside it (files and subfolders, even
 		// empty ones) is shown. The root folder (path '') is never a match.
 		const allFolders = this.app.vault.getAllLoadedFiles()
-			.filter((f): f is TFolder => f instanceof TFolder);
+			.filter((f): f is TFolder => f instanceof TFolder && inScope(f.path));
 		const matchedFolderPaths = allFolders
-			.filter(f => f.path !== '' && f.path.toLowerCase().includes(q))
+			.filter(f => f.path !== '' && rel(f.path).includes(q))
 			.map(f => f.path);
 		const isUnderMatched = (p: string): boolean =>
 			matchedFolderPaths.some(m => p === m || p.startsWith(m + '/'));
@@ -277,7 +381,7 @@ export default class FileFilterPlugin extends Plugin {
 		// Files whose full path contains the query, or that live under a matched folder
 		const matchingFilePaths = new Set(
 			this.app.vault.getFiles()
-				.filter(f => f.path.toLowerCase().includes(q) || isUnderMatched(f.path))
+				.filter(f => inScope(f.path) && (rel(f.path).includes(q) || isUnderMatched(f.path)))
 				.map(f => f.path),
 		);
 
@@ -318,7 +422,7 @@ export default class FileFilterPlugin extends Plugin {
 			// :scope > ensures we get the direct title child, not a nested folder's title
 			const path = el.querySelector(':scope > .nav-folder-title')?.getAttribute('data-path') ?? '';
 			const isRoot = el.classList.contains('mod-root') || path === '';
-			const show = isRoot || foldersToShow.has(path);
+			const show = isRoot || foldersToShow.has(path) || el.classList.contains('ff-scope-chain');
 			el.classList.toggle('ff-no-match', !show);
 		});
 
@@ -365,6 +469,8 @@ export default class FileFilterPlugin extends Plugin {
 	private insertSidebarEllipses(container: HTMLElement) {
 		this.removeSidebarEllipses(container);
 		container.querySelectorAll<HTMLElement>('.nav-folder-children').forEach(group => {
+			// Siblings of the folder-view chain are hidden anyway; no ellipses there
+			if (group.parentElement?.matches('.ff-scoped .ff-scope-chain:not(.ff-scope-root)')) return;
 			const items = Array.from(group.children).filter(
 				el => el.classList.contains('nav-file') || el.classList.contains('nav-folder'),
 			) as HTMLElement[];

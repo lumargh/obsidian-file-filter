@@ -233,3 +233,40 @@
 .ff-filtering .nav-folder:not(.ff-no-match).is-collapsed > .nav-folder-children {
 	display: block !important;
 }
+
+/*
+ * Folder view: the open folder (.ff-scope-root) and its ancestors form the
+ * scope chain. Their titles, indent and sibling items are hidden so the open
+ * folder's contents render as the top level of the tree.
+ */
+.ff-scope-header {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0 8px 8px;
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.ff-scope-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ff-scoped .ff-scope-chain > .nav-folder-title {
+	display: none;
+}
+
+.ff-scoped .ff-scope-chain > .nav-folder-children {
+	margin-inline-start: 0;
+	padding-inline-start: 0;
+	border-inline-start: none;
+}
+
+/* Top-level items sit directly in the files container (no root folder element) */
+.ff-scoped .nav-files-container > div > .tree-item:not(.ff-scope-chain),
+.ff-scoped .ff-scope-chain:not(.ff-scope-root) > .nav-folder-children > .tree-item:not(.ff-scope-chain) {
+	display: none;
+}
