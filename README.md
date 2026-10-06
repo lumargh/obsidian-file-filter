@@ -1,6 +1,6 @@
 # File Filter
 
-An [Obsidian](https://obsidian.md) plugin with two features: a live filter for the Files pane, and a paragraph-level filter for the editor.
+An [Obsidian](https://obsidian.md) plugin with two features: a live filter and folder view for the Files pane, and a paragraph-level filter for the editor.
 
 <p align="center">
 <a href="https://github.com/lumargh/obsidian-file-filter/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc">Vote on issues</a> · <a href="https://github.com/lumargh/obsidian-file-filter/issues/new?labels=bug">Report a bug</a> · <a href="https://github.com/lumargh/obsidian-file-filter/issues/new?labels=enhancement">Request a feature</a>
