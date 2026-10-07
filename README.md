@@ -91,6 +91,8 @@ Press **Escape** or click **×** to clear the filter and return to the normal vi
 
 ### Folder view
 
+<img src="assets/folder-view-demo.gif" alt="Folder view demo" width="300">
+
 Click a folder's **name** to open it: the Files pane narrows to just that folder's contents, like double-clicking a folder in Finder's list view. Click the **chevron** to expand or collapse a folder in place as usual.
 
 - Click **←** above the filter bar to go up to the parent folder; from a top-level folder it returns to the whole vault
