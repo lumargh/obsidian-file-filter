@@ -1,7 +1,7 @@
 // todo
 // 1 new feature > filter page: in edit mode, right-click selected text > filter by term
 
-import { MarkdownView, Plugin, TFolder, View, WorkspaceLeaf, setIcon } from 'obsidian';
+import { Keymap, MarkdownView, Plugin, TFolder, View, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { createLiveFilter, setExcludeMode, setFilterQuery, setPreserveStructure, setShowEllipses } from './live-filter';
 import { applyBlockFilter, clearBlockFilter } from './dom-filter';
@@ -27,6 +27,9 @@ interface FileExplorerItem {
 }
 interface FileExplorerView extends View {
 	fileItems: Record<string, FileExplorerItem | undefined>;
+	// Also used to make the nav buttons act on the open folder in folder view
+	createAbstractFile?: (type: 'file' | 'folder', parent: TFolder, newLeaf: unknown) => unknown;
+	tree?: { setCollapseAll?: (collapsed: boolean) => void; requestSaveFolds?: () => void };
 }
 
 export default class FileFilterPlugin extends Plugin {
@@ -152,6 +155,8 @@ export default class FileFilterPlugin extends Plugin {
 			this.clearFilter(container);
 			container.querySelector('.ff-scope-header')?.remove();
 			container.querySelector('.ff-search-btn')?.remove();
+			container.querySelector('.ff-collapse-btn')?.remove();
+			container.querySelector('.ff-native-collapse')?.classList.remove('ff-native-collapse', 'ff-hidden');
 			container.querySelector('.ff-search-container')?.remove();
 		}
 
@@ -225,6 +230,22 @@ export default class FileFilterPlugin extends Plugin {
 		});
 		setIcon(backBtn, 'arrow-left');
 		scopeHeader.createEl('span', { cls: 'ff-scope-label' });
+		// The native Collapse all / Expand all toggle can't track the folder
+		// view's state, so it's hidden and replaced by one that acts on the
+		// open folder's subfolders (or every folder outside folder view).
+		navButtons.querySelector('.lucide-chevrons-up-down, .lucide-chevrons-down-up')
+			?.closest('.nav-action-button')?.classList.add('ff-native-collapse', 'ff-hidden');
+		const collapseBtn = navButtons.createEl('button', { cls: 'clickable-icon nav-action-button ff-collapse-btn' });
+		collapseBtn.addEventListener('click', () => {
+			const folders = this.foldersInView();
+			const collapse = folders.some(f => !f.collapsed);
+			for (const f of folders) if (f.collapsed !== collapse) f.setCollapsed?.(collapse);
+			(this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.tree?.requestSaveFolds?.();
+			this.syncCollapseBtn(container);
+		});
+		this.syncCollapseBtn(container);
+		// Folders toggled by hand can change which action applies
+		this.registerDomEvent(container, 'click', () => window.requestAnimationFrame(() => this.syncCollapseBtn(container)));
 		searchContainer.before(scopeHeader);
 
 		backBtn.addEventListener('click', () => {
@@ -239,6 +260,20 @@ export default class FileFilterPlugin extends Plugin {
 		// toggle handler never sees the click.
 		this.registerDomEvent(container, 'click', (e: MouseEvent) => {
 			const target = e.target as HTMLElement;
+
+			// In folder view, New note / New folder create inside the open folder
+			const navBtn = target.closest('.nav-action-button');
+			const type = navBtn?.querySelector('.lucide-edit') ? 'file' : navBtn?.querySelector('.lucide-folder-plus') ? 'folder' : null;
+			if (type && this.scopePath !== null) {
+				const folder = this.app.vault.getAbstractFileByPath(this.scopePath);
+				const view = this.getExplorerLeaf()?.view as FileExplorerView | undefined;
+				if (!(folder instanceof TFolder) || !view?.createAbstractFile) return;
+				e.preventDefault();
+				e.stopPropagation();
+				view.createAbstractFile(type, folder, type === 'file' ? Keymap.isModEvent(e) || 'tab' : false);
+				return;
+			}
+
 			const title = target.closest<HTMLElement>('.nav-folder-title');
 			if (!title || target.closest('.collapse-icon') || title.parentElement?.classList.contains('mod-root')) return;
 			const path = title.getAttribute('data-path');
@@ -247,6 +282,19 @@ export default class FileFilterPlugin extends Plugin {
 			e.stopPropagation();
 			this.setScope(path);
 		}, { capture: true });
+
+		// Collapse all would also collapse the open folder and its ancestors,
+		// leaving the folder view empty; re-expand them afterwards.
+		const tree = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.tree;
+		const setCollapseAll = tree?.setCollapseAll;
+		if (tree && setCollapseAll) {
+			tree.setCollapseAll = (collapsed: boolean) => {
+				setCollapseAll.call(tree, collapsed);
+				if (this.scopePath !== null) this.expandScopeChain();
+				this.applyScope(container);
+			};
+			this.register(() => delete tree.setCollapseAll);
+		}
 
 		searchBtn.addEventListener('click', () => this.toggleSearch(container));
 		clearBtn.addEventListener('click', () => this.deactivateSearch(container));
@@ -273,26 +321,48 @@ export default class FileFilterPlugin extends Plugin {
 	private setScope(path: string | null) {
 		this.scopePath = path;
 		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems;
-		if (items) {
-			if (path === null) {
-				for (const p of this.scopeExpandedFolders) items[p]?.setCollapsed?.(true);
-				this.scopeExpandedFolders.clear();
-			} else {
-				// The open folder and its ancestors must be expanded to render it
-				const parts = path.split('/');
-				for (let i = 1; i <= parts.length; i++) {
-					const p = parts.slice(0, i).join('/');
-					if (!items[p]?.collapsed) continue;
-					items[p]?.setCollapsed?.(false);
-					this.scopeExpandedFolders.add(p);
-				}
-			}
+		if (path === null) {
+			for (const p of this.scopeExpandedFolders) items?.[p]?.setCollapsed?.(true);
+			this.scopeExpandedFolders.clear();
+		} else {
+			this.expandScopeChain();
 		}
 		const container = this.getExplorerContainer();
 		if (!container) return;
 		this.applyScope(container);
 		if (path !== null) this.getSearchEls(container).searchContainer?.classList.remove('ff-hidden');
 		if (this.filterActive) this.scheduleFilter();
+	}
+
+	// Folders the collapse button acts on: the open folder's subfolders, or
+	// every folder outside folder view
+	private foldersInView(): FileExplorerItem[] {
+		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems ?? {};
+		const scope = this.scopePath;
+		return Object.entries(items)
+			.filter(([p, item]) => typeof item?.collapsed === 'boolean' && p !== '/' && (scope === null || p.startsWith(scope + '/')))
+			.map(([, item]) => item as FileExplorerItem);
+	}
+
+	// Show the action the next click performs, like the native button
+	private syncCollapseBtn(container: HTMLElement) {
+		const btn = container.querySelector<HTMLElement>('.ff-collapse-btn');
+		if (!btn) return;
+		const collapse = this.foldersInView().some(f => !f.collapsed);
+		setIcon(btn, collapse ? 'chevrons-down-up' : 'chevrons-up-down');
+		btn.setAttribute('aria-label', collapse ? 'Collapse all' : 'Expand all');
+	}
+
+	// The open folder and its ancestors must be expanded to render it
+	private expandScopeChain() {
+		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems;
+		const parts = this.scopePath?.split('/') ?? [];
+		for (let i = 1; i <= parts.length; i++) {
+			const p = parts.slice(0, i).join('/');
+			if (!items?.[p]?.collapsed) continue;
+			items[p]?.setCollapsed?.(false);
+			this.scopeExpandedFolders.add(p);
+		}
 	}
 
 	// Mark the open folder and its ancestors; CSS hides their titles, their
@@ -302,6 +372,7 @@ export default class FileFilterPlugin extends Plugin {
 		const path = this.scopePath;
 		container.classList.toggle('ff-scoped', path !== null);
 		container.querySelector('.ff-scope-header')?.classList.toggle('ff-hidden', path === null);
+		this.syncCollapseBtn(container);
 		if (path === null) return;
 
 		container.querySelector('.ff-scope-label')?.setText(path.split('/').pop() ?? path);

@@ -95,6 +95,7 @@ Click a folder's **name** to open it: the Files pane narrows to just that folder
 
 - Click **←** above the filter bar to go up to the parent folder; from a top-level folder it returns to the whole vault
 - While a folder is open, the filter only searches inside it, matching paths relative to the folder
+- **New note** and **New folder** create inside the open folder; **Collapse all** / **Expand all** acts on its subfolders
 
 ---
 
