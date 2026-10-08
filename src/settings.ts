@@ -4,11 +4,13 @@ import type FileFilterPlugin from './main';
 export interface FileFilterSettings {
 	preserveStructure: boolean;
 	showEllipses: boolean;
+	folderView: boolean;
 }
 
 export const DEFAULT_SETTINGS: FileFilterSettings = {
 	preserveStructure: false,
 	showEllipses: true,
+	folderView: true,
 };
 
 export class FileFilterSettingTab extends PluginSettingTab {
@@ -46,6 +48,18 @@ export class FileFilterSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.showEllipses)
 					.onChange(async (value) => {
 						this.plugin.settings.showEllipses = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Open folders in folder view')
+			.setDesc('Clicking a folder name in the file explorer narrows it to that folder. When off, clicking expands or collapses the folder as usual.')
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.folderView)
+					.onChange(async (value) => {
+						this.plugin.settings.folderView = value;
 						await this.plugin.saveSettings();
 					}),
 			);

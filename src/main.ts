@@ -62,6 +62,7 @@ export default class FileFilterPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		if (!this.settings.folderView && this.scopePath !== null) this.setScope(null);
 		this.syncEllipsesClass();
 		this.reapplyPageFilters();
 	}
@@ -284,6 +285,7 @@ export default class FileFilterPlugin extends Plugin {
 				return;
 			}
 
+			if (!this.settings.folderView) return;
 			const title = target.closest<HTMLElement>('.nav-folder-title');
 			if (!title || target.closest('.collapse-icon') || title.parentElement?.classList.contains('mod-root')) return;
 			const path = title.getAttribute('data-path');
