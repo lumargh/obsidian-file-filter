@@ -240,7 +240,12 @@ export default class FileFilterPlugin extends Plugin {
 			attr: { 'aria-label': 'Back' },
 		});
 		setIcon(backBtn, 'arrow-left');
-		scopeHeader.createEl('span', { cls: 'ff-scope-label' });
+		const label = scopeHeader.createEl('span', { cls: 'ff-scope-label' });
+		// Clicking an ancestor in the path jumps straight to it
+		label.addEventListener('click', (e: MouseEvent) => {
+			const crumb = (e.target as HTMLElement).closest<HTMLElement>('.ff-scope-crumb');
+			if (crumb) this.setScope(crumb.dataset.path || null);
+		});
 		// The native Collapse all / Expand all toggle can't track the folder
 		// view's state, so it's hidden and replaced by one that acts on the
 		// open folder's subfolders (or every folder outside folder view).
@@ -388,8 +393,17 @@ export default class FileFilterPlugin extends Plugin {
 		container.querySelector('.ff-scope-header')?.classList.toggle('ff-hidden', path === null);
 		this.syncCollapseBtn(container);
 		if (path !== null) {
-			container.querySelector('.ff-scope-label')?.setText(path.split('/').pop() ?? path);
 			const parts = path.split('/');
+			const label = container.querySelector<HTMLElement>('.ff-scope-label');
+			if (label) {
+				label.empty();
+				label.createSpan({ cls: 'ff-scope-crumb', text: this.app.vault.getName(), attr: { 'data-path': '' } });
+				parts.forEach((part, i) => {
+					label.createSpan({ cls: 'ff-scope-sep', text: '/' });
+					const last = i === parts.length - 1;
+					label.createSpan(last ? { text: part } : { cls: 'ff-scope-crumb', text: part, attr: { 'data-path': parts.slice(0, i + 1).join('/') } });
+				});
+			}
 			for (let i = 1; i <= parts.length; i++) {
 				const folder = items[parts.slice(0, i).join('/')]?.el;
 				folder?.classList.add('ff-scope-chain');

@@ -259,6 +259,25 @@
 	white-space: nowrap;
 }
 
+.ff-scope-crumb,
+.ff-scope-sep {
+	color: var(--text-muted);
+	font-weight: var(--font-normal);
+}
+
+.ff-scope-crumb {
+	cursor: var(--cursor);
+}
+
+.ff-scope-crumb:hover {
+	color: var(--text-normal);
+	text-decoration: underline;
+}
+
+.ff-scope-sep {
+	margin: 0 2px;
+}
+
 .ff-scoped .ff-scope-chain > .nav-folder-title {
 	display: none;
 }
