@@ -38,7 +38,11 @@
 	display: none;
 }
 
-.ff-ellipsis {
+/* '···' where a run of hidden siblings was (see markSidebarGaps) */
+.ff-filtering .ff-gap-before::before,
+.ff-filtering .ff-gap-after::after {
+	content: '···';
+	display: block;
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
 	padding: 1px 24px;

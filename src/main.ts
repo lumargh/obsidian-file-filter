@@ -21,15 +21,25 @@ interface PageFilterController {
 
 // Undocumented internals of the core file-explorer view, used to auto-expand
 // collapsed folders that contain matches while a filter is active.
+// The explorer is virtualized: only items near the viewport are in the DOM,
+// so classes are set on each item's el (attached or not), and the scroller's
+// cached heights are invalidated after any change that hides or shows items.
 interface FileExplorerItem {
 	collapsed?: boolean;
 	setCollapsed?: (collapsed: boolean) => unknown;
+	el?: HTMLElement;
+	file?: unknown;
+	vChildren?: { children: FileExplorerItem[] };
 }
 interface FileExplorerView extends View {
 	fileItems: Record<string, FileExplorerItem | undefined>;
 	// Also used to make the nav buttons act on the open folder in folder view
 	createAbstractFile?: (type: 'file' | 'folder', parent: TFolder, newLeaf: unknown) => unknown;
-	tree?: { setCollapseAll?: (collapsed: boolean) => void; requestSaveFolds?: () => void };
+	tree?: {
+		setCollapseAll?: (collapsed: boolean) => void;
+		requestSaveFolds?: () => void;
+		infinityScroll?: { rootEl?: FileExplorerItem; invalidateAll?: () => void };
+	};
 }
 
 export default class FileFilterPlugin extends Plugin {
@@ -368,21 +378,23 @@ export default class FileFilterPlugin extends Plugin {
 	// Mark the open folder and its ancestors; CSS hides their titles, their
 	// other children and their indent, so the folder's contents read as the root.
 	private applyScope(container: HTMLElement) {
-		container.querySelectorAll('.ff-scope-chain').forEach(el => el.classList.remove('ff-scope-chain', 'ff-scope-root'));
+		const view = this.getExplorerLeaf()?.view as FileExplorerView | undefined;
+		const items = view?.fileItems ?? {};
+		for (const item of Object.values(items)) item?.el?.classList.remove('ff-scope-chain', 'ff-scope-root');
 		const path = this.scopePath;
 		container.classList.toggle('ff-scoped', path !== null);
 		container.querySelector('.ff-scope-header')?.classList.toggle('ff-hidden', path === null);
 		this.syncCollapseBtn(container);
-		if (path === null) return;
-
-		container.querySelector('.ff-scope-label')?.setText(path.split('/').pop() ?? path);
-		const parts = path.split('/');
-		for (let i = 1; i <= parts.length; i++) {
-			const p = parts.slice(0, i).join('/');
-			const folder = container.querySelector(`.nav-folder-title[data-path="${CSS.escape(p)}"]`)?.parentElement;
-			folder?.classList.add('ff-scope-chain');
-			if (i === parts.length) folder?.classList.add('ff-scope-root');
+		if (path !== null) {
+			container.querySelector('.ff-scope-label')?.setText(path.split('/').pop() ?? path);
+			const parts = path.split('/');
+			for (let i = 1; i <= parts.length; i++) {
+				const folder = items[parts.slice(0, i).join('/')]?.el;
+				folder?.classList.add('ff-scope-chain');
+				if (i === parts.length) folder?.classList.add('ff-scope-root');
+			}
 		}
+		view?.tree?.infinityScroll?.invalidateAll?.();
 	}
 
 	private toggleSearch(container: HTMLElement) {
@@ -484,29 +496,30 @@ export default class FileFilterPlugin extends Plugin {
 
 		container.classList.add('ff-filtering');
 
-		container.querySelectorAll<HTMLElement>('.nav-file').forEach(el => {
-			const path = el.querySelector('.nav-file-title')?.getAttribute('data-path') ?? '';
-			el.classList.toggle('ff-no-match', !matchingFilePaths.has(path));
-		});
-
-		container.querySelectorAll<HTMLElement>('.nav-folder').forEach(el => {
-			// :scope > ensures we get the direct title child, not a nested folder's title
-			const path = el.querySelector(':scope > .nav-folder-title')?.getAttribute('data-path') ?? '';
-			const isRoot = el.classList.contains('mod-root') || path === '';
-			const show = isRoot || foldersToShow.has(path) || el.classList.contains('ff-scope-chain');
+		const view = this.getExplorerLeaf()?.view as FileExplorerView | undefined;
+		for (const [path, item] of Object.entries(view?.fileItems ?? {})) {
+			const el = item?.el;
+			if (!el) continue;
+			const show = item.file instanceof TFolder
+				? foldersToShow.has(path) || el.classList.contains('ff-scope-chain')
+				: matchingFilePaths.has(path);
 			el.classList.toggle('ff-no-match', !show);
-		});
+		}
 
-		this.insertSidebarEllipses(container);
+		this.markSidebarGaps();
 		this.filterActive = true;
+		view?.tree?.infinityScroll?.invalidateAll?.();
 	}
 
 	private clearFilter(container: HTMLElement) {
-		this.removeSidebarEllipses(container);
 		container.classList.remove('ff-filtering');
-		container.querySelectorAll('.ff-no-match').forEach(el => el.classList.remove('ff-no-match'));
+		const view = this.getExplorerLeaf()?.view as FileExplorerView | undefined;
+		for (const item of Object.values(view?.fileItems ?? {})) {
+			item?.el?.classList.remove('ff-no-match', 'ff-gap-before', 'ff-gap-after');
+		}
 		this.restoreCollapsedFolders();
 		this.filterActive = false;
+		view?.tree?.infinityScroll?.invalidateAll?.();
 	}
 
 	// Expand collapsed folders that contain matches, remembering which ones we
@@ -537,32 +550,34 @@ export default class FileFilterPlugin extends Plugin {
 		this.autoExpandedFolders.clear();
 	}
 
-	private insertSidebarEllipses(container: HTMLElement) {
-		this.removeSidebarEllipses(container);
-		container.querySelectorAll<HTMLElement>('.nav-folder-children').forEach(group => {
-			// Siblings of the folder-view chain are hidden anyway; no ellipses there
-			if (group.parentElement?.matches('.ff-scoped .ff-scope-chain:not(.ff-scope-root)')) return;
-			const items = Array.from(group.children).filter(
-				el => el.classList.contains('nav-file') || el.classList.contains('nav-folder'),
-			) as HTMLElement[];
-			let i = 0;
-			while (i < items.length) {
-				if (items[i]!.classList.contains('ff-no-match')) {
-					let end = i;
-					while (end < items.length && items[end]!.classList.contains('ff-no-match')) end++;
-					const dot = createEl('div', { cls: 'ff-ellipsis', text: '···' });
-					if (end < items.length) group.insertBefore(dot, items[end]!);
-					else group.appendChild(dot);
-					i = end;
+	// Mark where runs of hidden siblings were with a '···' drawn by CSS on the
+	// next shown sibling (or, for a trailing run, the previous one). Inserted
+	// DOM nodes would be wiped by the virtualized explorer on scroll.
+	private markSidebarGaps() {
+		const view = this.getExplorerLeaf()?.view as FileExplorerView | undefined;
+		const items = Object.values(view?.fileItems ?? {});
+		for (const item of items) item?.el?.classList.remove('ff-gap-before', 'ff-gap-after');
+		const scope = this.scopePath;
+		for (const parent of [view?.tree?.infinityScroll?.rootEl, ...items]) {
+			if (!parent?.vChildren) continue;
+			// In folder view only the open folder and its subfolders count;
+			// siblings of the folder-view chain are hidden anyway
+			const path = parent.file instanceof TFolder ? parent.file.path : '';
+			if (scope !== null && path !== scope && !path.startsWith(scope + '/')) continue;
+			let gap = false;
+			let last: HTMLElement | undefined;
+			for (const child of parent.vChildren.children) {
+				if (!child.el) continue;
+				if (child.el.classList.contains('ff-no-match')) {
+					gap = true;
 				} else {
-					i++;
+					if (gap) child.el.classList.add('ff-gap-before');
+					gap = false;
+					last = child.el;
 				}
 			}
-		});
-	}
-
-	private removeSidebarEllipses(container: HTMLElement) {
-		container.querySelectorAll('.ff-ellipsis').forEach(el => el.remove());
+			if (gap) last?.classList.add('ff-gap-after');
+		}
 	}
 
 	private initPageFilters() {
