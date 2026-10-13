@@ -63,9 +63,9 @@ export default class FileFilterPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		if (!this.settings.folderView && this.scopePath !== null) this.setScope(null);
+		this.syncEnterButtons();
 		this.syncEllipsesClass();
 		this.reapplyPageFilters();
-		this.syncEnterButtons();
 	}
 
 	// 'Show ellipses' is global, so it's driven by a single class on each
@@ -174,9 +174,9 @@ export default class FileFilterPlugin extends Plugin {
 			container.querySelector('.ff-collapse-btn')?.remove();
 			container.querySelector('.ff-native-collapse')?.classList.remove('ff-native-collapse', 'ff-hidden');
 			container.querySelector('.ff-search-container')?.remove();
+			container.querySelectorAll('.ff-enter-folder').forEach(el => el.remove());
 		}
 
-			container.querySelectorAll('.ff-enter-folder').forEach(el => el.remove());
 		// Each controller removes its own injected UI, filter state, listeners
 		// and timers — including views living in popout windows.
 		this.pageFilters.forEach(({ destroy }) => destroy());
@@ -327,9 +327,9 @@ export default class FileFilterPlugin extends Plugin {
 		});
 
 		this.applyScope(container);
+		this.syncEnterButtons();
 
 		// Restore state if the explorer pane (or the plugin) was recreated
-		this.syncEnterButtons();
 		// while a filter was active
 		if (this.filterQuery) {
 			searchContainer.classList.remove('ff-hidden');
@@ -355,8 +355,6 @@ export default class FileFilterPlugin extends Plugin {
 		if (this.filterActive) this.scheduleFilter();
 	}
 
-	// Folders the collapse button acts on: the open folder's subfolders, or
-	// every folder outside folder view
 	// Give each folder title an arrow that opens it in the folder view
 	private syncEnterButtons() {
 		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems ?? {};
@@ -369,6 +367,8 @@ export default class FileFilterPlugin extends Plugin {
 		}
 	}
 
+	// Folders the collapse button acts on: the open folder's subfolders, or
+	// every folder outside folder view
 	private foldersInView(): FileExplorerItem[] {
 		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems ?? {};
 		const scope = this.scopePath;
