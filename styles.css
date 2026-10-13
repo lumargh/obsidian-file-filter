@@ -293,3 +293,20 @@
 .ff-scoped .ff-scope-chain:not(.ff-scope-root) > .nav-folder-children > .tree-item:not(.ff-scope-chain) {
 	display: none;
 }
+
+/* Arrow at the end of a folder title that opens it in the folder view */
+.ff-enter-folder {
+	margin-inline-start: auto;
+	padding: 0 2px;
+	color: var(--icon-color);
+	opacity: var(--icon-opacity);
+}
+
+.nav-folder-title > .ff-enter-folder:hover {
+	opacity: 1;
+}
+
+.ff-enter-folder svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}

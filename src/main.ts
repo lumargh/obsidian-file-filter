@@ -65,6 +65,7 @@ export default class FileFilterPlugin extends Plugin {
 		if (!this.settings.folderView && this.scopePath !== null) this.setScope(null);
 		this.syncEllipsesClass();
 		this.reapplyPageFilters();
+		this.syncEnterButtons();
 	}
 
 	// 'Show ellipses' is global, so it's driven by a single class on each
@@ -137,7 +138,11 @@ export default class FileFilterPlugin extends Plugin {
 		});
 
 		// Re-apply filter when vault contents change while a filter is active
-		this.registerEvent(this.app.vault.on('create', () => { if (this.filterActive) this.scheduleFilter(); }));
+		this.registerEvent(this.app.vault.on('create', file => {
+			// The explorer adds the new folder's item after this event fires
+			if (file instanceof TFolder) window.requestAnimationFrame(() => this.syncEnterButtons());
+			if (this.filterActive) this.scheduleFilter();
+		}));
 		this.registerEvent(this.app.vault.on('delete', file => {
 			// Leave the folder view if the open folder (or an ancestor) went away
 			const scope = this.scopePath;
@@ -171,6 +176,7 @@ export default class FileFilterPlugin extends Plugin {
 			container.querySelector('.ff-search-container')?.remove();
 		}
 
+			container.querySelectorAll('.ff-enter-folder').forEach(el => el.remove());
 		// Each controller removes its own injected UI, filter state, listeners
 		// and timers — including views living in popout windows.
 		this.pageFilters.forEach(({ destroy }) => destroy());
@@ -271,9 +277,9 @@ export default class FileFilterPlugin extends Plugin {
 			this.setScope(slash === -1 ? null : path.slice(0, slash));
 		});
 
-		// Clicking a folder's name opens it in the folder view; the chevron
-		// still expands/collapses in place. Capture phase so Obsidian's own
-		// toggle handler never sees the click.
+		// The arrow at the end of a folder's title opens it in the folder view;
+		// the title itself still expands/collapses in place. Capture phase so
+		// Obsidian's own toggle handler never sees the click.
 		this.registerDomEvent(container, 'click', (e: MouseEvent) => {
 			const target = e.target as HTMLElement;
 
@@ -290,10 +296,7 @@ export default class FileFilterPlugin extends Plugin {
 				return;
 			}
 
-			if (!this.settings.folderView) return;
-			const title = target.closest<HTMLElement>('.nav-folder-title');
-			if (!title || target.closest('.collapse-icon') || title.parentElement?.classList.contains('mod-root')) return;
-			const path = title.getAttribute('data-path');
+			const path = target.closest('.ff-enter-folder')?.parentElement?.getAttribute('data-path');
 			if (!path) return;
 			e.preventDefault();
 			e.stopPropagation();
@@ -326,6 +329,7 @@ export default class FileFilterPlugin extends Plugin {
 		this.applyScope(container);
 
 		// Restore state if the explorer pane (or the plugin) was recreated
+		this.syncEnterButtons();
 		// while a filter was active
 		if (this.filterQuery) {
 			searchContainer.classList.remove('ff-hidden');
@@ -353,6 +357,18 @@ export default class FileFilterPlugin extends Plugin {
 
 	// Folders the collapse button acts on: the open folder's subfolders, or
 	// every folder outside folder view
+	// Give each folder title an arrow that opens it in the folder view
+	private syncEnterButtons() {
+		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems ?? {};
+		for (const [path, item] of Object.entries(items)) {
+			const title = item?.el?.querySelector<HTMLElement>(':scope > .nav-folder-title');
+			if (!title || path === '/') continue;
+			const btn = title.querySelector(':scope > .ff-enter-folder');
+			if (!this.settings.folderView) btn?.remove();
+			else if (!btn) setIcon(title.createDiv({ cls: 'ff-enter-folder clickable-icon', attr: { 'aria-label': 'Open in folder view' } }), 'chevron-right');
+		}
+	}
+
 	private foldersInView(): FileExplorerItem[] {
 		const items = (this.getExplorerLeaf()?.view as FileExplorerView | undefined)?.fileItems ?? {};
 		const scope = this.scopePath;

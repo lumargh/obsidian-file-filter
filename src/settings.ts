@@ -54,7 +54,7 @@ export class FileFilterSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Open folders in folder view')
-			.setDesc('Clicking a folder name in the file explorer narrows it to that folder. When off, clicking expands or collapses the folder as usual.')
+			.setDesc('Show an arrow on each folder in the file explorer that narrows it to that folder.')
 			.addToggle(toggle =>
 				toggle
 					.setValue(this.plugin.settings.folderView)
